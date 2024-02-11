@@ -8,9 +8,16 @@ Goal:
 
 APIs to be used:
     - Etherscan
+        API key: 
     - Honeypot.is
+        No Api key is needed
+            - Can get tax
+            - Is honepot or not
     - Telegram
 */
+mod apis;
+use apis::get_token_info;
+
 fn main() {
-    println!("Hello, world!");
+    get_token_info();
 }
