@@ -58,18 +58,23 @@ impl HoneypotAPI {
 
 }
 
-pub fn get_token_info() {
-    let contract: &str = "0x07DC9B6A549E4C786819F28a385FDe4D88259823";
+pub fn get_token_info(contract: &str) {
     let url: String = format!("https://api.honeypot.is/v2/IsHoneypot?address={contract}", contract = contract);
-
     let response: Result<HoneypotAPI, reqwest::Error> = HoneypotAPI::send_request(&url);
+    let honeypot_api: HoneypotAPI = response.unwrap();
 
-    println!("{:#?}", response);
+    println!("Symbol: {:?}", HoneypotAPI::get_token_symbol(&honeypot_api));
+    println!("Name: {:?}", HoneypotAPI::get_token_name(&honeypot_api));
+    println!("Pair: {:?}", HoneypotAPI::get_pair_type(&honeypot_api));
+    println!("Pair symbol: {:?}", HoneypotAPI::get_token_pair_symbol(&honeypot_api));
+    println!("Is honeypot: {:?}", HoneypotAPI::get_is_honeypot(&honeypot_api));
+    println!("Tax: {:?}", HoneypotAPI::get_token_tax(&honeypot_api));
+    println!("Liquidity: {:?}", HoneypotAPI::get_pair_liquidity(&honeypot_api));
 }
 
 
 /*
-    Structs representing Honeypot.Is API, for JSON parsing
+    Structs representing Honeypot.is API, for JSON parsing
     Note: Serialization is not used, but complier throws warning if not used
 */
 
