@@ -58,6 +58,25 @@ impl HoneypotAPI {
 
 }
 
+    // match response.status() {
+    //     reqwest::StatusCode::OK => {
+    //         response.text()
+    //     },
+    //     reqwest::StatusCode::UNAUTHORIZED => {
+    //         Err(e) = response {
+    //             if e.error_for_status() {
+    //                 println!("Yes")
+    //             }
+    //         }
+    //     },
+    //     reqwest::StatusCode::NOT_FOUND => {
+    //         println!("404 Not found!");
+    //     },
+    //     _ => {
+    //         println!("Some other error happend!")
+    //     }
+    // }
+
 pub fn get_token_info(contract: &str) {
     let url: String = format!("https://api.honeypot.is/v2/IsHoneypot?address={contract}", contract = contract);
     let response: Result<HoneypotAPI, reqwest::Error> = HoneypotAPI::send_request(&url);

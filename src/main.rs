@@ -38,10 +38,17 @@ APIs to be used:
     - Telegram
         - listening for the signal
         - information output
+
+    Libs:
+        telegram-client     https://github.com/fewensa/telegram-client
+        teloxide            https://github.com/teloxide/teloxide
 */
-mod apis;
-use apis::get_token_info;
+#[path ="crypto/crypto.rs"]
+mod crypto;
+
+#[path = "telegram/telegram.rs"]
+mod telegram;
 
 fn main() {
-    get_token_info("0x07DC9B6A549E4C786819F28a385FDe4D88259823");
+
 }
