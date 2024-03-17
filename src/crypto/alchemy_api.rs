@@ -1,5 +1,8 @@
 use chrono::{ DateTime, Datelike };
-use std::{sync::{Arc, Mutex}, thread};
+use std::{env, sync::{Arc, Mutex}, thread};
+use reqwest::{header::CONTENT_TYPE, Client};
+use serde::{de, Deserialize, Serialize};
+use serde_json;
 
 /* 
 
@@ -13,7 +16,7 @@ TODO:
 
 impl CUInner {
     fn default() -> Self {
-        CUInner {
+        Self {
             used_cu: Mutex::new(0),
             max_cu: 300_000_000,
             days_since_reset: Mutex::new(0),
@@ -42,7 +45,7 @@ impl CUInner {
 
 impl CU {
     fn default() -> Self {
-        CU {
+        Self {
             inner: Arc::new(CUInner::default()),
         }
     }
@@ -53,7 +56,7 @@ impl CU {
         
         thread::spawn(move || {
             loop {
-                thread::sleep(chrono::Duration::days(1).to_std().unwrap());
+                thread::sleep(chrono::Duration::try_days(1).unwrap().to_std().unwrap());
                 
                 local_self.start_of_month_reset_cu();
             }
@@ -78,4 +81,102 @@ pub fn start_cu_instance() -> CU {
     compute_unit.start();
 
     compute_unit
+}
+
+
+pub async fn get_gas() -> f64 {
+    tokio::task::spawn_blocking(|| {
+        let gas = AlchemyAPI::<String>::get_eth_gas();
+        to_gwei(&gas.unwrap().result)
+    }).await.expect("'get_gas' method panicked")
+}
+
+pub async fn get_balance() -> String {
+    tokio::task::spawn_blocking(|| {
+        let balance = AlchemyAPI::<String>::get_eth_balance(env::var("ETH_ADDRESS").unwrap());
+        format!("{} eth", to_eth(&balance.unwrap().result))
+    }).await.expect("'get_balance' method panicked")
+}
+
+fn to_eth(hex: &String) -> f64 {
+    let rm_prefix = hex.trim_start_matches("0x");
+    let wei = u64::from_str_radix(rm_prefix, 16);
+    let eth: f64 = wei.unwrap() as f64 / 10.0f64.powf(18.0);
+    eth
+}
+
+fn to_gwei(hex: &String) -> f64 {
+    let rm_prefix = hex.trim_start_matches("0x");
+    let wei = u64::from_str_radix(rm_prefix, 16);
+    let gwei: f64 = wei.unwrap() as f64 / 10.0f64.powf(9.0);
+    gwei
+}
+
+impl<T: de::DeserializeOwned> AlchemyAPI<T> {
+
+    // function currently has to consume body arg as it would have to have a 'static lifetime.
+    #[tokio::main]
+    async fn send_request(payload: AlchemyPayload) -> Result<AlchemyAPI<T>, reqwest::Error> {
+
+        let response = Client::new()
+            .post(format!("https://eth-mainnet.g.alchemy.com/v2/{}", env::var("ALCHEMY_API").unwrap()))
+            .header(CONTENT_TYPE, "applciation/json")
+            .body(serde_json::to_string(&payload).unwrap())
+            .send()
+            .await
+            .expect("failed response")
+            .json()
+            .await?;
+        
+        Ok(response)
+    }
+
+    fn get_eth_balance(address: String) -> Result<AlchemyAPI<String>, reqwest::Error> {
+        let request: AlchemyPayload = AlchemyPayload { 
+            params: Some(vec![
+                String::from(address),
+                String::from("latest"),
+            ]),
+            method: String::from("eth_getBalance"),
+            ..AlchemyPayload::default()
+        };
+    
+        AlchemyAPI::send_request(request)
+    }
+
+    fn get_eth_gas() -> Result<AlchemyAPI<String>, reqwest::Error> {
+        let request: AlchemyPayload = AlchemyPayload {
+            method: String::from("eth_gasPrice"),
+            ..AlchemyPayload::default()
+        };
+
+        AlchemyAPI::send_request(request)
+    }
+
+}
+
+#[derive(Debug, Deserialize)]
+struct AlchemyAPI<T> {
+    jsonrpc: String,
+    id: u32,
+    result: T,
+}
+
+impl AlchemyPayload {
+    fn default() -> Self {
+        Self {
+            id: 1,
+            jsonrpc: String::from("2.0"),
+            params: None,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+struct AlchemyPayload {
+    id: u8,
+    jsonrpc: String,
+    params: Option<Vec<String>>,
+    method: String
 }
