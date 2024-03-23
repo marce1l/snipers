@@ -1,16 +1,62 @@
 use teloxide::{
     dispatching::{dialogue::{self, InMemStorage}, UpdateHandler},
     prelude::*,
-    utils::command::BotCommands
+    utils::command::{BotCommands, parse_command}
 };
+use lazy_static::lazy_static;
+use core::fmt;
+use std::{str::FromStr, sync::Mutex};
 
 #[path ="../crypto/crypto.rs"]
 mod crypto;
 use crypto::alchemy_api;
 
-
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+#[derive(Clone, Debug)]
+enum OrderType {
+    Buy,
+    Sell
+}
+
+impl fmt::Display for OrderType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            OrderType::Buy => write!(f, "buy"),
+            OrderType::Sell => write!(f, "sell")
+        }
+    }
+}
+
+impl FromStr for OrderType {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "buy" => Ok(OrderType::Buy),
+            "sell" => Ok(OrderType::Sell),
+            _ => Err(())
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct TradeToken {
+    contract: Option<String>,
+    amount: Option<f64>,
+    slippage: Option<f32>,
+    order_type: OrderType,
+}
+
+impl fmt::Display for TradeToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TradeToken will only be displayed if parameters are correct
+        match self.order_type {
+            OrderType::Buy => write!(f, "📄 Contract: {}\n💰Amount: {}\n🏷 Slippage: {}\n🟢 Order type: {}", self.contract.as_ref().unwrap(), self.amount.as_ref().unwrap(), self.slippage.as_ref().unwrap(), self.order_type),
+            OrderType::Sell => write!(f, "📄 Contract: {}\n💰Amount: {}\n🏷 Slippage: {}\n🔴 Order type: {}", self.contract.as_ref().unwrap(), self.amount.as_ref().unwrap(), self.slippage.as_ref().unwrap(), self.order_type)
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub enum State {
@@ -26,26 +72,16 @@ enum Command {
     Help,
     #[command(description = "buy ERC-20 token")]
     Buy(String),
-    #[command(description = "link telegram group to monitor")]
-    TelegramGroup,
-    #[command(description = "start trading group signals")]
-    Start,
-    #[command(description = "stop trading group signals")]
-    Stop,
+    #[command(description = "sell ERC-20 token")]
+    Sell(String),
     #[command(description = "get wallet balance")]
     Balance,
-    #[command(description = "get last entry")]
-    LastEntry,
-    #[command(description = "adjust take profit")]
-    TakeProfit,
-    #[command(description = "adjust stop loss")]
-    StopLoss,
-    #[command(description = "adjust max hold time")]
-    MaxHoldTime,
-    #[command(description = "all-time pnl")]
-    Pnl,
     #[command(description = "cancel current command")]
     Cancel,
+}
+
+lazy_static! {
+    static ref TRADE_TOKEN: Mutex<TradeToken> = Mutex::new(TradeToken { contract: None, amount: None, slippage: None, order_type: OrderType::Buy });
 }
 
 
@@ -72,7 +108,8 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(
             case![State::Buy]
                 .branch(case![Command::Help].endpoint(help))
-                .branch(case![Command::Buy(ctr)].endpoint(buy_token)),
+                .branch(case![Command::Buy(tt)].endpoint(trade_token))
+                .branch(case![Command::Sell(tt)].endpoint(trade_token)),
         )
         .branch(case![Command::Cancel].endpoint(cancel));
 
@@ -87,47 +124,82 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
 
 
 
-async fn balance(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, format!("Your wallet balance is {}", alchemy_api::get_balance().await)).await?;
-    Ok(())
-} 
+fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<TradeToken> {
+    let mut trade_token: TradeToken = TradeToken { contract: None, amount: None, slippage: None, order_type: order_type };
 
-// async fn watch_wallets()
-use teloxide::utils::command::parse_command;
+    if args.len() != 3 {
+        return None;
+    }
 
-#[derive(Debug)]
-struct BuyToken {
-    contract: String,
-    amount: f64,
-    slippage: f32,
-}
-
-fn convert_to_buytoken(args: Vec<&str>) -> BuyToken {
-    assert_eq!(args.len(), 3);
     // etherum addresses are 42 characters long (including the 0x prefix)
-    assert_eq!(args[0].len(), 42);
-    
-    let amount: f64 = match args[1].parse() {
-        Ok(v) => v,
-        Err(_) => 0.0
+    if args[0].len() == 42 {
+        trade_token.contract = Some(String::from(args[0]));
+    } else {
+        trade_token.contract = None;
+    }
+
+    trade_token.amount = match args[1].parse() {
+        Ok(v) => Some(v),
+        Err(_) => None
     };
 
-    let slippage: f32 = match args[2].parse() {
-        Ok(v) => v,
-        Err(_) => 0.0
+    trade_token.slippage = match args[2].parse() {
+        Ok(v) => Some(v),
+        Err(_) => None
     };
-    
-    BuyToken { contract: String::from(args[0]), amount: amount, slippage: slippage }
+
+    let mut token = TRADE_TOKEN.lock().unwrap();
+    *token = trade_token.clone();
+
+    Some(trade_token)
 }
 
-async fn buy_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    let (command, args) = parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
-    let buy = convert_to_buytoken(args);
+async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+    let (command, args) = parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();    
+    let trade_token: Option<TradeToken> = validate_tradetoken_args(&args, OrderType::from_str(command.to_lowercase().as_str()).unwrap());
+    let mut incorrect_params: bool = false;
 
-    bot.send_message(msg.chat.id, format!("contract: {}\namount: {}\nslippage: {}", buy.contract, buy.amount, buy.slippage)).await?;
-    bot.send_message(msg.chat.id, "Do you want to execute the transaction?").await?;
+    match trade_token.clone() {
+        Some(tt) => {
+            match tt.contract {
+                Some(ctr) => (),
+                None => {
+                    incorrect_params = true;
+                    bot.send_message(msg.chat.id, format!("Trade cancelled: submitted contract is incorrect!")).await?;
+                }
+            }
+
+            match tt.amount {
+                Some(am) => (),
+                None => {
+                    incorrect_params = true;
+                    bot.send_message(msg.chat.id, format!("Trade cancelled: submitted amount is incorrect!")).await?;
+                }
+            }
+
+            match tt.slippage {
+                Some(slp) => (),
+                None => {
+                    incorrect_params = true;
+                    bot.send_message(msg.chat.id, format!("Trade cancelled: submitted slippage is incorrect!")).await?;
+                }
+            }
+        },
+        None => {
+            incorrect_params = true;
+            bot.send_message(msg.chat.id, format!("Trade cancelled: submitted trade parameters are incorrect!")).await?;
+        }
+    };
+
+    if !incorrect_params {
+        bot.send_message(msg.chat.id, format!("{}", trade_token.clone().unwrap())).await?;
+        bot.send_message(msg.chat.id, "Do you want to execute the transaction?").await?;
+        
+        dialogue.update(State::Confirm).await?;
+    } else {
+        dialogue.exit().await?;
+    }
     
-    dialogue.update(State::Confirm).await?;
     Ok(())
 }
 
@@ -144,6 +216,11 @@ async fn confirm(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult 
     Ok(())
 }
 
+async fn balance(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+    bot.send_message(msg.chat.id, format!("Your wallet balance is {}", alchemy_api::get_balance().await)).await?;
+    Ok(())
+}
+
 async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Current command is cancelled").await?;
     dialogue.exit().await?;
@@ -156,7 +233,6 @@ async fn help(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
 }
 
 async fn invalid_state(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Unable to handle the message. Type /help to see the usage.")
-        .await?;
+    bot.send_message(msg.chat.id, "Type /help to see availabe commands.").await?;
     Ok(())
 }
