@@ -1,7 +1,9 @@
 use teloxide::{
-    dispatching::{dialogue::{self, InMemStorage}, UpdateHandler},
-    prelude::*,
-    utils::command::{BotCommands, parse_command}
+    dispatching::{
+        dialogue::{self, GetChatId, InMemStorage}, UpdateFilterExt, UpdateHandler},
+        prelude::*,
+        types::{InlineKeyboardButton, InlineKeyboardMarkup},
+        utils::command::{parse_command, BotCommands}
 };
 use lazy_static::lazy_static;
 use core::fmt;
@@ -61,7 +63,7 @@ impl fmt::Display for TradeToken {
 #[derive(Clone, Default)]
 pub enum State {
     #[default]
-    Buy,
+    Start,
     Confirm,
 }
 
@@ -76,12 +78,15 @@ enum Command {
     Sell(String),
     #[command(description = "get wallet balance")]
     Balance,
+    #[command(description = "start monitoring etherum wallets")]
+    Watch(String),
     #[command(description = "cancel current command")]
     Cancel,
 }
 
 lazy_static! {
     static ref TRADE_TOKEN: Mutex<TradeToken> = Mutex::new(TradeToken { contract: None, amount: None, slippage: None, order_type: OrderType::Buy });
+    static ref WATCHED_WALLETS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 }
 
 
@@ -91,7 +96,7 @@ pub async fn main() {
     log::info!("Starting command bot...");
 
     let bot = Bot::from_env();
-    
+
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![InMemStorage::<State>::new()])
         .enable_ctrlc_handler()
@@ -103,26 +108,39 @@ pub async fn main() {
 
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     use dptree::case;
-    
+
     let command_handler = teloxide::filter_command::<Command, _>()
         .branch(
-            case![State::Buy]
-                .branch(case![Command::Help].endpoint(help))
-                .branch(case![Command::Buy(tt)].endpoint(trade_token))
-                .branch(case![Command::Sell(tt)].endpoint(trade_token)),
+            case![State::Start]
+            .branch(case![Command::Buy(tt)].endpoint(trade_token))
+            .branch(case![Command::Sell(tt)].endpoint(trade_token))
+            .branch(case![Command::Balance].endpoint(balance))
         )
+        .branch(case![Command::Watch(w)].endpoint(watch_wallets))
+        .branch(case![Command::Help].endpoint(help))
         .branch(case![Command::Cancel].endpoint(cancel));
 
     let message_handler = Update::filter_message()
         .branch(command_handler)
-        .branch(case![State::Confirm].endpoint(confirm))
         .branch(dptree::endpoint(invalid_state));
+
+    let callback_query_handler = Update::filter_callback_query()
+        .branch(case![State::Confirm].endpoint(confirm));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
+        .branch(callback_query_handler)
 }
 
+fn make_yes_no_keyboard() -> InlineKeyboardMarkup {
+    let buttons: Vec<Vec<InlineKeyboardButton>> = vec![
+        vec![
+            InlineKeyboardButton::callback("No", "no"),
+            InlineKeyboardButton::callback("Yes", "yes")]
+        ];
 
+    InlineKeyboardMarkup::new(buttons)
+}
 
 fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<TradeToken> {
     let mut trade_token: TradeToken = TradeToken { contract: None, amount: None, slippage: None, order_type: order_type };
@@ -132,7 +150,7 @@ fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<T
     }
 
     // etherum addresses are 42 characters long (including the 0x prefix)
-    if args[0].len() == 42 {
+    if args[0].len() == 42 && args[0].starts_with("0x") {
         trade_token.contract = Some(String::from(args[0]));
     } else {
         trade_token.contract = None;
@@ -148,21 +166,38 @@ fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<T
         Err(_) => None
     };
 
-    let mut token = TRADE_TOKEN.lock().unwrap();
-    *token = trade_token.clone();
+    let mut tt = TRADE_TOKEN.lock().unwrap();
+    *tt = trade_token.clone();
 
     Some(trade_token)
 }
 
+fn validate_watchwallets_args(args: &Vec<&str>) -> Option<Vec<String>> {
+    let mut watched_wallets: Vec<String> = vec![];
+
+    for wallet in args {
+        // etherum addresses are 42 characters long (including the 0x prefix)
+        if wallet.starts_with("0x") && wallet.len() == 42 {
+            watched_wallets.push(String::from(wallet.to_owned()));
+        }
+    }
+
+    let mut ww = WATCHED_WALLETS.lock().unwrap();
+    *ww = watched_wallets.clone();
+
+    if watched_wallets.is_empty() { None }  else { Some(watched_wallets) }
+}
+
+
 async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    let (command, args) = parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();    
+    let (command, args) = parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
     let trade_token: Option<TradeToken> = validate_tradetoken_args(&args, OrderType::from_str(command.to_lowercase().as_str()).unwrap());
     let mut incorrect_params: bool = false;
 
     match trade_token.clone() {
         Some(tt) => {
             match tt.contract {
-                Some(ctr) => (),
+                Some(_) => (),
                 None => {
                     incorrect_params = true;
                     bot.send_message(msg.chat.id, format!("Trade cancelled: submitted contract is incorrect!")).await?;
@@ -170,7 +205,7 @@ async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRes
             }
 
             match tt.amount {
-                Some(am) => (),
+                Some(_) => (),
                 None => {
                     incorrect_params = true;
                     bot.send_message(msg.chat.id, format!("Trade cancelled: submitted amount is incorrect!")).await?;
@@ -178,7 +213,7 @@ async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRes
             }
 
             match tt.slippage {
-                Some(slp) => (),
+                Some(_) => (),
                 None => {
                     incorrect_params = true;
                     bot.send_message(msg.chat.id, format!("Trade cancelled: submitted slippage is incorrect!")).await?;
@@ -193,31 +228,69 @@ async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRes
 
     if !incorrect_params {
         bot.send_message(msg.chat.id, format!("{}", trade_token.clone().unwrap())).await?;
-        bot.send_message(msg.chat.id, "Do you want to execute the transaction?").await?;
-        
+        bot.send_message(msg.chat.id, "Do you want to execute the transaction?").reply_markup(make_yes_no_keyboard()).await?;
+
         dialogue.update(State::Confirm).await?;
     } else {
         dialogue.exit().await?;
     }
-    
+
     Ok(())
 }
 
-async fn confirm(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    let response = msg.text().unwrap();
+async fn confirm(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+    let chat_id = q.chat_id().unwrap();
 
-    if response == "yes" || response == "y" {
-        bot.send_message(msg.chat.id, "Transaction executed!").await?;
-    } else {
-        bot.send_message(msg.chat.id, "Transaction was not executed!").await?;
+    match q.clone().data {
+        Some(d) => {
+            bot.answer_callback_query(q.id).await?;
+
+            bot.delete_message(chat_id, q.message.unwrap().id).await?;
+
+            if d == "yes" {
+                bot.send_message(chat_id, format!("Transaction executed!")).await?;
+                // TODO: handle transaction
+            } else if d == "no" {
+                bot.send_message(chat_id, format!("Transaction was not executed!")).await?;
+            }
+        }
+        None => {
+            bot.send_message(chat_id, format!("Something went wrong with the button handling")).await?;
+        }
     }
 
     dialogue.exit().await?;
     Ok(())
 }
 
-async fn balance(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn balance(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, format!("Your wallet balance is {}", alchemy_api::get_balance().await)).await?;
+    Ok(())
+}
+
+async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
+    let (_, args) = parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
+    let wallets = validate_watchwallets_args(&args);
+
+    match wallets {
+        Some(v) => {
+            // TODO: handle watching wallets
+
+            let mut message: String = String::from("Wallets to watch:\n");
+            let mut counter: u8 = 0;
+
+            for wallet in v {
+                counter = counter + 1;
+                message.push_str(&format!("\n{}. {}", counter, &wallet));
+            }
+
+            bot.send_message(msg.chat.id, message).await?;
+        },
+        None => {
+            bot.send_message(msg.chat.id, format!("Watch wallets cancelled: submitted wallets are incorrect")).await?;
+        }
+    }
+
     Ok(())
 }
 
@@ -227,7 +300,7 @@ async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     Ok(())
 }
 
-async fn help(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn help(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
     Ok(())
 }
