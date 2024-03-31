@@ -12,6 +12,7 @@ use std::{str::FromStr, sync::Mutex};
 #[path ="../crypto/crypto.rs"]
 mod crypto;
 use crypto::alchemy_api;
+use crypto::etherscan_api;
 
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -76,8 +77,12 @@ enum Command {
     Buy(String),
     #[command(description = "sell ERC-20 token")]
     Sell(String),
-    #[command(description = "get wallet balance")]
+    #[command(description = "get wallet ETH balance")]
     Balance,
+    #[command(description = "get wallet ERC-20 token balances")]
+    Tokens,
+    #[command(description = "get current eth gas")]
+    Gas,
     #[command(description = "start monitoring etherum wallets")]
     Watch(String),
     #[command(description = "cancel current command")]
@@ -114,7 +119,9 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
             case![State::Start]
             .branch(case![Command::Buy(tt)].endpoint(trade_token))
             .branch(case![Command::Sell(tt)].endpoint(trade_token))
-            .branch(case![Command::Balance].endpoint(balance))
+            .branch(case![Command::Balance].endpoint(get_eth_balance))
+            .branch(case![Command::Tokens].endpoint(get_erc20_balances))
+            .branch(case![Command::Gas].endpoint(get_eth_gas))
         )
         .branch(case![Command::Watch(w)].endpoint(watch_wallets))
         .branch(case![Command::Help].endpoint(help))
@@ -263,8 +270,8 @@ async fn confirm(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerRes
     Ok(())
 }
 
-async fn balance(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, format!("Your wallet balance is {}", alchemy_api::get_balance().await)).await?;
+async fn get_eth_balance(bot: Bot, msg: Message) -> HandlerResult {
+    bot.send_message(msg.chat.id, format!("Your wallet balance is {}", alchemy_api::get_eth_balance().await)).await?;
     Ok(())
 }
 
@@ -291,6 +298,32 @@ async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
         }
     }
 
+    Ok(())
+}
+
+async fn get_erc20_balances(bot: Bot, msg: Message) -> HandlerResult {
+    let token_balances = alchemy_api::get_token_balances().await;
+    let mut message: String = String::from("ERC-20 Token balances:\n");
+
+    for tb in token_balances {
+        println!("{}", tb);
+        message.push_str(&format!("\n{}", tb));
+    }
+
+    bot.send_message(msg.chat.id, format!("{}", message)).await?;
+    Ok(())
+}
+
+async fn get_eth_gas(bot: Bot, msg: Message) -> HandlerResult {
+    // gas estimations based on cryptoneur.xyz/en/gas-fees-calculator
+    let gwei_fee = alchemy_api::get_gas().await;
+    let eth_price: f64 = etherscan_api::get_eth_price().await;
+
+    let uniswap_v2: f64 = gwei_fee * 0.000000001 * eth_price * 152809.0 * 1.03;
+    let uniswap_v3: f64 = gwei_fee * 0.000000001 * eth_price * 184523.0 * 1.03;
+
+    let response = format!("Current eth gas is: {:.0} gwei\n\nEstimated fees:\n🦄 Uniswap V2 swap: {:.2} $\n🦄 Uniswap V3 swap: {:.2} $", gwei_fee, uniswap_v2, uniswap_v3);
+    bot.send_message(msg.chat.id, response).await?;
     Ok(())
 }
 

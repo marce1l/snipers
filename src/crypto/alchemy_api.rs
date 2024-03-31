@@ -1,10 +1,10 @@
 use chrono::{ DateTime, Datelike };
-use std::{env, sync::{Arc, Mutex}, thread};
+use std::{env, fmt, sync::{Arc, Mutex}, thread};
 use reqwest::{header::CONTENT_TYPE, Client};
 use serde::{de, Deserialize, Serialize};
 use serde_json;
 
-/* 
+/*
 
 TODO:
     - Handle mutex poisoning
@@ -22,7 +22,7 @@ impl CUInner {
             days_since_reset: Mutex::new(0),
         }
     }
-    
+
     fn add_cu(&self, cu: u32) {
         *self.used_cu.lock().unwrap() += cu;
     }
@@ -53,11 +53,11 @@ impl CU {
     // calls the 'start_of_month_reset_cu' function once a day
     fn start(&mut self) {
         let local_self = self.inner.clone();
-        
+
         thread::spawn(move || {
             loop {
                 thread::sleep(chrono::Duration::try_days(1).unwrap().to_std().unwrap());
-                
+
                 local_self.start_of_month_reset_cu();
             }
         });
@@ -88,14 +88,21 @@ pub async fn get_gas() -> f64 {
     tokio::task::spawn_blocking(|| {
         let gas = AlchemyAPI::<String>::get_eth_gas();
         to_gwei(&gas.unwrap().result)
-    }).await.expect("'get_gas' method panicked")
+    }).await.expect("AlchemyAPI 'get_gas' method panicked")
 }
 
-pub async fn get_balance() -> String {
+pub async fn get_eth_balance() -> String {
     tokio::task::spawn_blocking(|| {
         let balance = AlchemyAPI::<String>::get_eth_balance(env::var("ETH_ADDRESS").unwrap());
         format!("{} eth", to_eth(&balance.unwrap().result))
-    }).await.expect("'get_balance' method panicked")
+    }).await.expect("AlchemyAPI 'get_balance' method panicked")
+}
+
+pub async fn get_token_balances() -> Vec<TokenBalances> {
+    tokio::task::spawn_blocking(|| {
+        let token_balances = AlchemyAPI::<TokenBalancesResult>::get_token_balances(env::var("ETH_ADDRESS").unwrap());
+        token_balances.unwrap().result.token_balances
+    }).await.expect("AlchemyAPI 'get_token_balances' method panicked")
 }
 
 fn to_eth(hex: &String) -> f64 {
@@ -127,12 +134,12 @@ impl<T: de::DeserializeOwned> AlchemyAPI<T> {
             .expect("failed response")
             .json()
             .await?;
-        
+
         Ok(response)
     }
 
     fn get_eth_balance(address: String) -> Result<AlchemyAPI<String>, reqwest::Error> {
-        let request: AlchemyPayload = AlchemyPayload { 
+        let payload: AlchemyPayload = AlchemyPayload {
             params: Some(vec![
                 String::from(address),
                 String::from("latest"),
@@ -140,17 +147,29 @@ impl<T: de::DeserializeOwned> AlchemyAPI<T> {
             method: String::from("eth_getBalance"),
             ..AlchemyPayload::default()
         };
-    
-        AlchemyAPI::send_request(request)
+
+        AlchemyAPI::send_request(payload)
     }
 
     fn get_eth_gas() -> Result<AlchemyAPI<String>, reqwest::Error> {
-        let request: AlchemyPayload = AlchemyPayload {
+        let payload: AlchemyPayload = AlchemyPayload {
             method: String::from("eth_gasPrice"),
             ..AlchemyPayload::default()
         };
 
-        AlchemyAPI::send_request(request)
+        AlchemyAPI::send_request(payload)
+    }
+
+    fn get_token_balances(address: String) -> Result<AlchemyAPI<TokenBalancesResult>, reqwest::Error> {
+        let payload: AlchemyPayload = AlchemyPayload {
+            params: Some(vec![
+                String::from(address)
+            ]),
+            method: String::from("alchemy_getTokenBalances"),
+            ..AlchemyPayload::default()
+        };
+
+        AlchemyAPI::send_request(payload)
     }
 
 }
@@ -179,4 +198,24 @@ struct AlchemyPayload {
     jsonrpc: String,
     params: Option<Vec<String>>,
     method: String
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenBalancesResult {
+    address: String,
+    token_balances: Vec<TokenBalances>
+}
+
+impl fmt::Display for TokenBalances {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "contract: {}\nbalance: {}", self.contract_address, self.token_balance)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenBalances {
+    contract_address: String,
+    token_balance: String
 }
