@@ -1,9 +1,10 @@
 use chrono::{ DateTime, Datelike };
-use std::{env, fmt, sync::{Arc, Mutex}, thread};
+use std::{collections::HashMap, env, fmt, sync::{Arc, Mutex}, thread};
 use reqwest::{header::CONTENT_TYPE, Client};
 use serde::{de, Deserialize, Serialize};
 use serde_json;
 
+use crate::crypto::honeypot_api;
 /*
 
 TODO:
@@ -84,7 +85,7 @@ pub fn start_cu_instance() -> CU {
 }
 
 
-pub async fn get_gas() -> f64 {
+pub async fn get_eth_gas() -> f64 {
     tokio::task::spawn_blocking(|| {
         let gas = AlchemyAPI::<String>::get_eth_gas();
         to_gwei(&gas.unwrap().result)
@@ -94,30 +95,54 @@ pub async fn get_gas() -> f64 {
 pub async fn get_eth_balance() -> String {
     tokio::task::spawn_blocking(|| {
         let balance = AlchemyAPI::<String>::get_eth_balance(env::var("ETH_ADDRESS").unwrap());
-        format!("{} eth", to_eth(&balance.unwrap().result))
+        format!("{}", to_eth(&balance.unwrap().result))
     }).await.expect("AlchemyAPI 'get_balance' method panicked")
 }
 
-pub async fn get_token_balances() -> Vec<TokenBalances> {
+pub async fn get_token_balances() -> HashMap<String, HashMap<String, String>> {
     tokio::task::spawn_blocking(|| {
         let token_balances = AlchemyAPI::<TokenBalancesResult>::get_token_balances(env::var("ETH_ADDRESS").unwrap());
-        token_balances.unwrap().result.token_balances
+        to_owned_tokens(token_balances.unwrap().result.token_balances)
     }).await.expect("AlchemyAPI 'get_token_balances' method panicked")
 }
 
-fn to_eth(hex: &String) -> f64 {
+fn hex_to_decimal(hex: &String) -> u128 {
     let rm_prefix = hex.trim_start_matches("0x");
-    let wei = u64::from_str_radix(rm_prefix, 16);
-    let eth: f64 = wei.unwrap() as f64 / 10.0f64.powf(18.0);
+    u128::from_str_radix(rm_prefix, 16).unwrap()
+}
+
+fn to_eth(hex: &String) -> f64 {
+    let wei = hex_to_decimal(&hex);
+    let eth: f64 = wei as f64 / 10.0f64.powf(18.0);
     eth
 }
 
 fn to_gwei(hex: &String) -> f64 {
-    let rm_prefix = hex.trim_start_matches("0x");
-    let wei = u64::from_str_radix(rm_prefix, 16);
-    let gwei: f64 = wei.unwrap() as f64 / 10.0f64.powf(9.0);
+    let wei = hex_to_decimal(&hex);
+    let gwei: f64 = wei as f64 / 10.0f64.powf(9.0);
     gwei
 }
+
+fn to_owned_tokens(token_balances: Vec<TokenBalance>) -> HashMap<String, HashMap<String, String>> {
+    let mut tokens = HashMap::new();
+
+    for tb in token_balances {
+        if tb.token_balance != "0x0000000000000000000000000000000000000000000000000000000000000000" {
+            let token_info: honeypot_api::TokenInfo = honeypot_api::get_token_info(&tb.contract_address);
+
+            tokens.insert(token_info.name, HashMap::from([
+                (String::from("contract"), tb.contract_address),
+                (String::from("symbol"), token_info.symbol),
+                (String::from("balance"), format!("{:.2}", hex_to_decimal(&tb.token_balance) as f64/10.0f64.powf(token_info.decimals as f64))),
+                // TODO: need another api for fetching token current price
+                (String::from("balance_usd"), format!("{}", to_eth(&String::from("0x0000")))),
+            ]));
+        }
+    }
+
+    tokens
+}
+
 
 impl<T: de::DeserializeOwned> AlchemyAPI<T> {
 
@@ -204,10 +229,10 @@ struct AlchemyPayload {
 #[serde(rename_all = "camelCase")]
 struct TokenBalancesResult {
     address: String,
-    token_balances: Vec<TokenBalances>
+    token_balances: Vec<TokenBalance>
 }
 
-impl fmt::Display for TokenBalances {
+impl fmt::Display for TokenBalance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "contract: {}\nbalance: {}", self.contract_address, self.token_balance)
     }
@@ -215,7 +240,7 @@ impl fmt::Display for TokenBalances {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TokenBalances {
+struct TokenBalance {
     contract_address: String,
     token_balance: String
 }

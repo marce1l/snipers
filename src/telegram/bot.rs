@@ -8,6 +8,7 @@ use teloxide::{
 use lazy_static::lazy_static;
 use core::fmt;
 use std::{str::FromStr, sync::Mutex};
+use thousands::Separable;
 
 #[path ="../crypto/crypto.rs"]
 mod crypto;
@@ -271,7 +272,11 @@ async fn confirm(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerRes
 }
 
 async fn get_eth_balance(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, format!("Your wallet balance is {}", alchemy_api::get_eth_balance().await)).await?;
+    let eth_price = etherscan_api::get_eth_price().await;
+    let eth_balance = alchemy_api::get_eth_balance().await.parse::<f64>().unwrap();
+    let usd_balance = ((eth_balance*eth_price) * 100.0).round() / 100.0;
+
+    bot.send_message(msg.chat.id, format!("Wallet balance:\n{:.4} ETH (${})", eth_balance, usd_balance.separate_with_commas())).await?;
     Ok(())
 }
 
@@ -304,10 +309,15 @@ async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
 async fn get_erc20_balances(bot: Bot, msg: Message) -> HandlerResult {
     let token_balances = alchemy_api::get_token_balances().await;
     let mut message: String = String::from("ERC-20 Token balances:\n");
+    let mut counter: u8 = 0;
 
-    for tb in token_balances {
-        println!("{}", tb);
-        message.push_str(&format!("\n{}", tb));
+    for (token, fields) in token_balances {
+        message.push_str(&format!("\n{token} ({symbol})\n📄 contract: {contract}\n💰 balance: {balance} (${balance_usd})\n",
+            token = token,
+            symbol = fields.get("symbol").unwrap(),
+            contract = fields.get("contract").unwrap(),
+            balance = fields.get("balance").unwrap().separate_with_commas(),
+            balance_usd = fields.get("balance_usd").unwrap().separate_with_commas()));
     }
 
     bot.send_message(msg.chat.id, format!("{}", message)).await?;
@@ -315,14 +325,14 @@ async fn get_erc20_balances(bot: Bot, msg: Message) -> HandlerResult {
 }
 
 async fn get_eth_gas(bot: Bot, msg: Message) -> HandlerResult {
-    // gas estimations based on cryptoneur.xyz/en/gas-fees-calculator
-    let gwei_fee = alchemy_api::get_gas().await;
+    let gwei_fee = alchemy_api::get_eth_gas().await;
     let eth_price: f64 = etherscan_api::get_eth_price().await;
 
+    // gas estimations calculated based on cryptoneur.xyz/en/gas-fees-calculator + fees
     let uniswap_v2: f64 = gwei_fee * 0.000000001 * eth_price * 152809.0 * 1.03;
     let uniswap_v3: f64 = gwei_fee * 0.000000001 * eth_price * 184523.0 * 1.03;
 
-    let response = format!("Current eth gas is: {:.0} gwei\n\nEstimated fees:\n🦄 Uniswap V2 swap: {:.2} $\n🦄 Uniswap V3 swap: {:.2} $", gwei_fee, uniswap_v2, uniswap_v3);
+    let response = format!("Current eth gas is: {:.0} gwei\n\nEstimated fees:\n🦄 Uniswap V2 swap: ${:.2}\n🦄 Uniswap V3 swap: ${:.2}", gwei_fee, uniswap_v2, uniswap_v3);
     bot.send_message(msg.chat.id, response).await?;
     Ok(())
 }

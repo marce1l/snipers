@@ -2,10 +2,46 @@ use reqwest::Client;
 use serde::{ Deserialize, Serialize };
 
 
+pub fn get_token_info(contract: &str) -> TokenInfo {
+    let honeypot_api: HoneypotAPI = HoneypotAPI::send_request(
+        format!("https://api.honeypot.is/v2/IsHoneypot?address={}", contract)
+    ).unwrap();
+
+
+    TokenInfo {
+        symbol: HoneypotAPI::get_token_symbol(&honeypot_api),
+        name: HoneypotAPI::get_token_name(&honeypot_api),
+        decimals: HoneypotAPI::get_token_deciamls(&honeypot_api),
+        pair: HoneypotAPI::get_pair_type(&honeypot_api),
+        pair_symbol: HoneypotAPI::get_token_pair_symbol(&honeypot_api),
+        is_honeypot: HoneypotAPI::get_is_honeypot(&honeypot_api).0,
+        honeypot_reason: HoneypotAPI::get_is_honeypot(&honeypot_api).1,
+        buy_tax: HoneypotAPI::get_token_tax(&honeypot_api).0,
+        sell_tax: HoneypotAPI::get_token_tax(&honeypot_api).1,
+        liquidity: HoneypotAPI::get_pair_liquidity(&honeypot_api)
+    }
+}
+
+
+#[derive(Debug)]
+pub struct TokenInfo {
+    pub symbol: String,
+    pub name: String,
+    pub decimals: u8,
+    pub pair: String,
+    pub pair_symbol: String,
+    pub is_honeypot: bool,
+    pub honeypot_reason: Option<String>,
+    pub buy_tax: f32,
+    pub sell_tax: f32,
+    pub liquidity: f32
+}
+
+
 impl HoneypotAPI {
 
     #[tokio::main]
-    async fn send_request(url: &str) -> Result<HoneypotAPI, reqwest::Error> {
+    async fn send_request(url: String) -> Result<HoneypotAPI, reqwest::Error> {
 
         let response: HoneypotAPI = Client::new()
         .get(url)
@@ -13,63 +49,63 @@ impl HoneypotAPI {
         .await?
         .json()
         .await?;
-        
+
         Ok(response)
     }
 
-    fn get_token_name(api: &HoneypotAPI) -> &String {
-        &api.token.name
+    fn get_token_name(api: &HoneypotAPI) -> String {
+        api.token.name.to_owned()
     }
 
-    fn get_token_symbol(api: &HoneypotAPI) -> &String {
-        &api.token.symbol
+    fn get_token_symbol(api: &HoneypotAPI) -> String {
+        api.token.symbol.to_owned()
     }
 
-    fn get_token_pair_symbol(api: &HoneypotAPI) -> &String {
-        &api.with_token.symbol
+    fn get_token_deciamls(api: &HoneypotAPI) -> u8 {
+        api.token.decimals
+    }
+
+    fn get_token_pair_symbol(api: &HoneypotAPI) -> String {
+        api.with_token.symbol.to_owned()
     }
 
     fn get_token_tax(api: &HoneypotAPI) -> (f32, f32) {
-        (api.simulation_result.as_ref().unwrap().buy_tax, api.simulation_result.as_ref().unwrap().sell_tax)
+        match api.simulation_result.as_ref() {
+            Some(simulation_result) => {
+                (simulation_result.buy_tax, simulation_result.sell_tax)
+            },
+            // In case honeypot.is simulation failed (token is honeypot), simulation result nad buy/sell tax fields are not sent
+            // Buy/sell tax set to 100% as token is a honeypot, so tax should not matter
+            None => {
+                (100.0, 100.0)
+            }
+        }
     }
 
-    fn get_is_honeypot(api: &HoneypotAPI) -> (bool, &Option<String>) {
-        let is_honeypot: bool = api.honeypot_result.as_ref().unwrap().is_honeypot;
-        
-        if is_honeypot { return (is_honeypot, &api.honeypot_result.as_ref().unwrap().honeypot_reason); }
-        (is_honeypot, &None)
+    fn get_is_honeypot(api: &HoneypotAPI) -> (bool, Option<String>) {
+        match api.honeypot_result.as_ref() {
+            Some(honeypot_result) => {
+                if honeypot_result.is_honeypot {
+                    (honeypot_result.is_honeypot, honeypot_result.honeypot_reason.to_owned())
+                } else {
+                    (honeypot_result.is_honeypot, None)
+                }
+            },
+            None => {
+                (true, Some(String::from("Warning! honeypot could not be determined as honeypot.is api did not send field")))
+            },
+        }
     }
 
-    fn get_pair_liquidity(api: &HoneypotAPI) -> &f32 {
-        &api.pair.liquidity
+    fn get_pair_liquidity(api: &HoneypotAPI) -> f32 {
+        api.pair.liquidity
     }
 
-    fn get_pair_type(api: &HoneypotAPI) -> &String {
-        &api.pair.pair.pair_type
+    fn get_pair_type(api: &HoneypotAPI) -> String {
+        api.pair.pair.pair_type.to_owned()
     }
 
 }
-
-
-pub fn get_token_info(contract: &str) {
-    let url: String = format!("https://api.honeypot.is/v2/IsHoneypot?address={contract}", contract = contract);
-    let response: Result<HoneypotAPI, reqwest::Error> = HoneypotAPI::send_request(&url);
-    let honeypot_api: HoneypotAPI = response.unwrap();
-
-    println!("Symbol: {:?}", HoneypotAPI::get_token_symbol(&honeypot_api));
-    println!("Name: {:?}", HoneypotAPI::get_token_name(&honeypot_api));
-    println!("Pair: {:?}", HoneypotAPI::get_pair_type(&honeypot_api));
-    println!("Pair symbol: {:?}", HoneypotAPI::get_token_pair_symbol(&honeypot_api));
-    println!("Is honeypot: {:?}", HoneypotAPI::get_is_honeypot(&honeypot_api));
-    println!("Tax: {:?}", HoneypotAPI::get_token_tax(&honeypot_api));
-    println!("Liquidity: {:?}", HoneypotAPI::get_pair_liquidity(&honeypot_api));
-}
-
-
-/*
-    Structs representing Honeypot.is API, for JSON parsing
-    Note: Serialization is not used, but complier throws warning if not used
-*/
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
