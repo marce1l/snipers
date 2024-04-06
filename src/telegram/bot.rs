@@ -1,19 +1,17 @@
+use crate::api;
+use core::fmt;
+use lazy_static::lazy_static;
+use std::{str::FromStr, sync::Mutex};
 use teloxide::{
     dispatching::{
-        dialogue::{self, GetChatId, InMemStorage}, UpdateFilterExt, UpdateHandler},
-        prelude::*,
-        types::{InlineKeyboardButton, InlineKeyboardMarkup},
-        utils::command::{parse_command, BotCommands}
+        dialogue::{self, GetChatId, InMemStorage},
+        UpdateFilterExt, UpdateHandler,
+    },
+    prelude::*,
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId},
+    utils::command::{parse_command, BotCommands},
 };
-use lazy_static::lazy_static;
-use core::fmt;
-use std::{str::FromStr, sync::Mutex};
 use thousands::Separable;
-
-#[path ="../crypto/crypto.rs"]
-mod crypto;
-use crypto::alchemy_api;
-use crypto::etherscan_api;
 
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -21,14 +19,14 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 #[derive(Clone, Debug)]
 enum OrderType {
     Buy,
-    Sell
+    Sell,
 }
 
 impl fmt::Display for OrderType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             OrderType::Buy => write!(f, "buy"),
-            OrderType::Sell => write!(f, "sell")
+            OrderType::Sell => write!(f, "sell"),
         }
     }
 }
@@ -39,7 +37,7 @@ impl FromStr for OrderType {
         match s {
             "buy" => Ok(OrderType::Buy),
             "sell" => Ok(OrderType::Sell),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -56,8 +54,22 @@ impl fmt::Display for TradeToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TradeToken will only be displayed if parameters are correct
         match self.order_type {
-            OrderType::Buy => write!(f, "📄 Contract: {}\n💰Amount: {}\n🏷 Slippage: {}\n🟢 Order type: {}", self.contract.as_ref().unwrap(), self.amount.as_ref().unwrap(), self.slippage.as_ref().unwrap(), self.order_type),
-            OrderType::Sell => write!(f, "📄 Contract: {}\n💰Amount: {}\n🏷 Slippage: {}\n🔴 Order type: {}", self.contract.as_ref().unwrap(), self.amount.as_ref().unwrap(), self.slippage.as_ref().unwrap(), self.order_type)
+            OrderType::Buy => write!(
+                f,
+                "📄 Contract: {}\n💰Amount: {}\n🏷 Slippage: {}\n🟢 Order type: {}",
+                self.contract.as_ref().unwrap(),
+                self.amount.as_ref().unwrap(),
+                self.slippage.as_ref().unwrap(),
+                self.order_type
+            ),
+            OrderType::Sell => write!(
+                f,
+                "📄 Contract: {}\n💰Amount: {}\n🏷 Slippage: {}\n🔴 Order type: {}",
+                self.contract.as_ref().unwrap(),
+                self.amount.as_ref().unwrap(),
+                self.slippage.as_ref().unwrap(),
+                self.order_type
+            ),
         }
     }
 }
@@ -70,9 +82,12 @@ pub enum State {
 }
 
 #[derive(BotCommands, Clone, Debug)]
-#[command(description = "These commands are supported:", rename_rule = "lowercase")]
+#[command(
+    description = "These commands are supported:",
+    rename_rule = "lowercase"
+)]
 enum Command {
-    #[command(description = "help command")]
+    #[command(description = "list availabe commands")]
     Help,
     #[command(description = "buy ERC-20 token")]
     Buy(String),
@@ -91,10 +106,14 @@ enum Command {
 }
 
 lazy_static! {
-    static ref TRADE_TOKEN: Mutex<TradeToken> = Mutex::new(TradeToken { contract: None, amount: None, slippage: None, order_type: OrderType::Buy });
+    static ref TRADE_TOKEN: Mutex<TradeToken> = Mutex::new(TradeToken {
+        contract: None,
+        amount: None,
+        slippage: None,
+        order_type: OrderType::Buy
+    });
     static ref WATCHED_WALLETS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 }
-
 
 #[tokio::main]
 pub async fn main() {
@@ -111,18 +130,17 @@ pub async fn main() {
         .await;
 }
 
-
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     use dptree::case;
 
     let command_handler = teloxide::filter_command::<Command, _>()
         .branch(
             case![State::Start]
-            .branch(case![Command::Buy(tt)].endpoint(trade_token))
-            .branch(case![Command::Sell(tt)].endpoint(trade_token))
-            .branch(case![Command::Balance].endpoint(get_eth_balance))
-            .branch(case![Command::Tokens].endpoint(get_erc20_balances))
-            .branch(case![Command::Gas].endpoint(get_eth_gas))
+                .branch(case![Command::Buy(tt)].endpoint(trade_token))
+                .branch(case![Command::Sell(tt)].endpoint(trade_token))
+                .branch(case![Command::Balance].endpoint(get_eth_balance))
+                .branch(case![Command::Tokens].endpoint(get_erc20_balances))
+                .branch(case![Command::Gas].endpoint(get_eth_gas)),
         )
         .branch(case![Command::Watch(w)].endpoint(watch_wallets))
         .branch(case![Command::Help].endpoint(help))
@@ -132,8 +150,8 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(command_handler)
         .branch(dptree::endpoint(invalid_state));
 
-    let callback_query_handler = Update::filter_callback_query()
-        .branch(case![State::Confirm].endpoint(confirm));
+    let callback_query_handler =
+        Update::filter_callback_query().branch(case![State::Confirm].endpoint(confirm_transaction));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
@@ -141,17 +159,21 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
 }
 
 fn make_yes_no_keyboard() -> InlineKeyboardMarkup {
-    let buttons: Vec<Vec<InlineKeyboardButton>> = vec![
-        vec![
-            InlineKeyboardButton::callback("No", "no"),
-            InlineKeyboardButton::callback("Yes", "yes")]
-        ];
+    let buttons: Vec<Vec<InlineKeyboardButton>> = vec![vec![
+        InlineKeyboardButton::callback("No", "no"),
+        InlineKeyboardButton::callback("Yes", "yes"),
+    ]];
 
     InlineKeyboardMarkup::new(buttons)
 }
 
 fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<TradeToken> {
-    let mut trade_token: TradeToken = TradeToken { contract: None, amount: None, slippage: None, order_type: order_type };
+    let mut trade_token: TradeToken = TradeToken {
+        contract: None,
+        amount: None,
+        slippage: None,
+        order_type: order_type,
+    };
 
     if args.len() != 3 {
         return None;
@@ -166,12 +188,12 @@ fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<T
 
     trade_token.amount = match args[1].parse() {
         Ok(v) => Some(v),
-        Err(_) => None
+        Err(_) => None,
     };
 
     trade_token.slippage = match args[2].parse() {
         Ok(v) => Some(v),
-        Err(_) => None
+        Err(_) => None,
     };
 
     let mut tt = TRADE_TOKEN.lock().unwrap();
@@ -193,22 +215,38 @@ fn validate_watchwallets_args(args: &Vec<&str>) -> Option<Vec<String>> {
     let mut ww = WATCHED_WALLETS.lock().unwrap();
     *ww = watched_wallets.clone();
 
-    if watched_wallets.is_empty() { None }  else { Some(watched_wallets) }
+    if watched_wallets.is_empty() {
+        None
+    } else {
+        Some(watched_wallets)
+    }
 }
 
+async fn loading_message(bot: &Bot, msg: &Message) -> MessageId {
+    let loading_message = bot.send_message(msg.chat.id, "...").await;
+    loading_message.unwrap().id
+}
 
 async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    let (command, args) = parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
-    let trade_token: Option<TradeToken> = validate_tradetoken_args(&args, OrderType::from_str(command.to_lowercase().as_str()).unwrap());
+    let (command, args) =
+        parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
+    let trade_token: Option<TradeToken> = validate_tradetoken_args(
+        &args,
+        OrderType::from_str(command.to_lowercase().as_str()).unwrap(),
+    );
     let mut incorrect_params: bool = false;
 
-    match trade_token.clone() {
+    match trade_token {
         Some(tt) => {
             match tt.contract {
                 Some(_) => (),
                 None => {
                     incorrect_params = true;
-                    bot.send_message(msg.chat.id, format!("Trade cancelled: submitted contract is incorrect!")).await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("Trade cancelled: submitted contract is incorrect!"),
+                    )
+                    .await?;
                 }
             }
 
@@ -216,7 +254,11 @@ async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRes
                 Some(_) => (),
                 None => {
                     incorrect_params = true;
-                    bot.send_message(msg.chat.id, format!("Trade cancelled: submitted amount is incorrect!")).await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("Trade cancelled: submitted amount is incorrect!"),
+                    )
+                    .await?;
                 }
             }
 
@@ -224,29 +266,37 @@ async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRes
                 Some(_) => (),
                 None => {
                     incorrect_params = true;
-                    bot.send_message(msg.chat.id, format!("Trade cancelled: submitted slippage is incorrect!")).await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("Trade cancelled: submitted slippage is incorrect!"),
+                    )
+                    .await?;
                 }
             }
-        },
+
+            if !incorrect_params {
+                bot.send_message(msg.chat.id, format!("{}", tt)).await?;
+                bot.send_message(msg.chat.id, "Do you want to execute the transaction?")
+                    .reply_markup(make_yes_no_keyboard())
+                    .await?;
+
+                dialogue.update(State::Confirm).await?;
+            }
+        }
         None => {
-            incorrect_params = true;
-            bot.send_message(msg.chat.id, format!("Trade cancelled: submitted trade parameters are incorrect!")).await?;
+            bot.send_message(
+                msg.chat.id,
+                format!("Trade cancelled: submitted trade parameters are incorrect!"),
+            )
+            .await?;
+            dialogue.exit().await?;
         }
     };
-
-    if !incorrect_params {
-        bot.send_message(msg.chat.id, format!("{}", trade_token.clone().unwrap())).await?;
-        bot.send_message(msg.chat.id, "Do you want to execute the transaction?").reply_markup(make_yes_no_keyboard()).await?;
-
-        dialogue.update(State::Confirm).await?;
-    } else {
-        dialogue.exit().await?;
-    }
 
     Ok(())
 }
 
-async fn confirm(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+async fn confirm_transaction(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
     let chat_id = q.chat_id().unwrap();
 
     match q.clone().data {
@@ -256,14 +306,20 @@ async fn confirm(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerRes
             bot.delete_message(chat_id, q.message.unwrap().id).await?;
 
             if d == "yes" {
-                bot.send_message(chat_id, format!("Transaction executed!")).await?;
+                bot.send_message(chat_id, format!("Transaction executed!"))
+                    .await?;
                 // TODO: handle transaction
             } else if d == "no" {
-                bot.send_message(chat_id, format!("Transaction was not executed!")).await?;
+                bot.send_message(chat_id, format!("Transaction was not executed!"))
+                    .await?;
             }
         }
         None => {
-            bot.send_message(chat_id, format!("Something went wrong with the button handling")).await?;
+            bot.send_message(
+                chat_id,
+                format!("Something went wrong with the button handling"),
+            )
+            .await?;
         }
     }
 
@@ -272,16 +328,50 @@ async fn confirm(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerRes
 }
 
 async fn get_eth_balance(bot: Bot, msg: Message) -> HandlerResult {
-    let eth_price = etherscan_api::get_eth_price().await;
-    let eth_balance = alchemy_api::get_eth_balance().await.parse::<f64>().unwrap();
-    let usd_balance = ((eth_balance*eth_price) * 100.0).round() / 100.0;
+    let loading_message_id = loading_message(&bot, &msg).await;
 
-    bot.send_message(msg.chat.id, format!("Wallet balance:\n{:.4} ETH (${})", eth_balance, usd_balance.separate_with_commas())).await?;
+    match api::get_eth_price().await {
+        Ok(eth_price) => match api::get_eth_balance().await {
+            Ok(balance) => {
+                let eth_balance = balance.parse::<f64>().unwrap_or(0.0);
+                let usd_balance = ((eth_balance * eth_price) * 100.0).round() / 100.0;
+
+                bot.delete_message(msg.chat.id, loading_message_id).await?;
+                bot.send_message(
+                    msg.chat.id,
+                    format!(
+                        "Wallet balance:\n{:.4} ETH (${})",
+                        eth_balance,
+                        usd_balance.separate_with_commas()
+                    ),
+                )
+                .await?;
+            }
+            Err(e) => {
+                bot.delete_message(msg.chat.id, loading_message_id).await?;
+                bot.send_message(
+                    msg.chat.id,
+                    format!("Something went wrong: {}\n\nPlease try again", e),
+                )
+                .await?;
+            }
+        },
+        Err(e) => {
+            bot.delete_message(msg.chat.id, loading_message_id).await?;
+            bot.send_message(
+                msg.chat.id,
+                format!("Something went wrong: {}\n\nPlease try again", e),
+            )
+            .await?;
+        }
+    }
+
     Ok(())
 }
 
 async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
-    let (_, args) = parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
+    let (_, args) =
+        parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
     let wallets = validate_watchwallets_args(&args);
 
     match wallets {
@@ -297,9 +387,13 @@ async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
             }
 
             bot.send_message(msg.chat.id, message).await?;
-        },
+        }
         None => {
-            bot.send_message(msg.chat.id, format!("Watch wallets cancelled: submitted wallets are incorrect")).await?;
+            bot.send_message(
+                msg.chat.id,
+                format!("Watch wallets cancelled: submitted wallets are incorrect"),
+            )
+            .await?;
         }
     }
 
@@ -307,48 +401,91 @@ async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
 }
 
 async fn get_erc20_balances(bot: Bot, msg: Message) -> HandlerResult {
-    let token_balances = alchemy_api::get_token_balances().await;
-    let mut message: String = String::from("ERC-20 Token balances:\n");
-    let mut counter: u8 = 0;
+    let loading_message_id = loading_message(&bot, &msg).await;
 
-    for (token, fields) in token_balances {
-        message.push_str(&format!("\n{token} ({symbol})\n📄 contract: {contract}\n💰 balance: {balance} (${balance_usd})\n",
-            token = token,
-            symbol = fields.get("symbol").unwrap(),
-            contract = fields.get("contract").unwrap(),
-            balance = fields.get("balance").unwrap().separate_with_commas(),
-            balance_usd = fields.get("balance_usd").unwrap().separate_with_commas()));
+    match api::get_token_balances().await {
+        Ok(token_balances) => {
+            let mut message: String = String::from("ERC-20 Token balances:\n");
+
+            for (token, fields) in token_balances {
+                message.push_str(&format!("\n{token} ({symbol})\n📄 contract: {contract}\n💰 balance: {balance} (${balance_usd})\n",
+                    token = token,
+                    symbol = fields.get("symbol").unwrap(),
+                    contract = fields.get("contract").unwrap(),
+                    balance = fields.get("balance").unwrap().separate_with_commas(),
+                    balance_usd = fields.get("balance_usd").unwrap().separate_with_commas()));
+            }
+
+            bot.delete_message(msg.chat.id, loading_message_id).await?;
+            bot.send_message(msg.chat.id, format!("{}", message))
+                .await?;
+        }
+        Err(e) => {
+            bot.delete_message(msg.chat.id, loading_message_id).await?;
+            bot.send_message(
+                msg.chat.id,
+                format!("Something went wrong: {}\n\nPlease try again", e),
+            )
+            .await?;
+        }
     }
 
-    bot.send_message(msg.chat.id, format!("{}", message)).await?;
     Ok(())
 }
 
 async fn get_eth_gas(bot: Bot, msg: Message) -> HandlerResult {
-    let gwei_fee = alchemy_api::get_eth_gas().await;
-    let eth_price: f64 = etherscan_api::get_eth_price().await;
+    let loading_message_id = loading_message(&bot, &msg).await;
 
-    // gas estimations calculated based on cryptoneur.xyz/en/gas-fees-calculator + fees
-    let uniswap_v2: f64 = gwei_fee * 0.000000001 * eth_price * 152809.0 * 1.03;
-    let uniswap_v3: f64 = gwei_fee * 0.000000001 * eth_price * 184523.0 * 1.03;
+    match api::get_eth_gas().await {
+        Ok(gwei_fee) => {
+            match api::get_eth_price().await {
+                Ok(eth_price) => {
+                    // gas estimations calculated based on cryptoneur.xyz/en/gas-fees-calculator + fees
+                    let uniswap_v2: f64 = gwei_fee * 0.000000001 * eth_price * 152809.0 * 1.03;
+                    let uniswap_v3: f64 = gwei_fee * 0.000000001 * eth_price * 184523.0 * 1.03;
 
-    let response = format!("Current eth gas is: {:.0} gwei\n\nEstimated fees:\n🦄 Uniswap V2 swap: ${:.2}\n🦄 Uniswap V3 swap: ${:.2}", gwei_fee, uniswap_v2, uniswap_v3);
-    bot.send_message(msg.chat.id, response).await?;
+                    let response = format!("Current eth gas is: {:.0} gwei\n\nEstimated fees:\n🦄 Uniswap V2 swap: ${:.2}\n🦄 Uniswap V3 swap: ${:.2}", gwei_fee, uniswap_v2, uniswap_v3);
+                    bot.delete_message(msg.chat.id, loading_message_id).await?;
+                    bot.send_message(msg.chat.id, response).await?;
+                }
+                Err(e) => {
+                    bot.delete_message(msg.chat.id, loading_message_id).await?;
+                    bot.send_message(
+                        msg.chat.id,
+                        format!("Something went wrong: {}\n\nPlease try again", e),
+                    )
+                    .await?;
+                }
+            }
+        }
+        Err(e) => {
+            bot.delete_message(msg.chat.id, loading_message_id).await?;
+            bot.send_message(
+                msg.chat.id,
+                format!("Something went wrong: {}\n\nPlease try again", e),
+            )
+            .await?;
+        }
+    }
+
     Ok(())
 }
 
 async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Current command is cancelled").await?;
+    bot.send_message(msg.chat.id, "Current command is cancelled")
+        .await?;
     dialogue.exit().await?;
     Ok(())
 }
 
 async fn help(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+    bot.send_message(msg.chat.id, Command::descriptions().to_string())
+        .await?;
     Ok(())
 }
 
 async fn invalid_state(bot: Bot, msg: Message) -> HandlerResult {
-    bot.send_message(msg.chat.id, "Type /help to see availabe commands.").await?;
+    bot.send_message(msg.chat.id, "Type /help to see availabe commands.")
+        .await?;
     Ok(())
 }

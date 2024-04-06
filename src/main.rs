@@ -27,7 +27,7 @@ TODO:
         - optimal strategy for exiting trade
         - risk reward calculation
             tax, gas, fees, capital, liquidity/market cap
-            
+
 APIs to be used:
     - Alchemy
         - transaction execution
@@ -39,16 +39,25 @@ APIs to be used:
         - listening for the signal
         - information output
 
-    Libs:
-        telegram-client     https://github.com/fewensa/telegram-client
-        teloxide            https://github.com/teloxide/teloxide
+Libs:
+    telegram-client     https://github.com/fewensa/telegram-client
+    teloxide            https://github.com/teloxide/teloxide
 */
-#[path ="crypto/crypto.rs"]
+#[path = "api/api.rs"]
+mod api;
+#[path = "crypto/crypto.rs"]
 mod crypto;
-
 #[path = "telegram/telegram.rs"]
 mod telegram;
+mod utils;
+
+use std::env;
 
 fn main() {
+    env::set_var("ALCHEMY_API", "");
+    env::set_var("TELOXIDE_TOKEN", "");
+    env::set_var("ETH_ADDRESS", "");
+    env::set_var("ETHERSCAN_API", "");
 
+    telegram::bot::main();
 }

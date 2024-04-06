@@ -36,11 +36,11 @@ You need to set the following environment variables.
 
 > Command parameters should be seperated by one whitespace
 
-/help - list availabe commands</br>
-/buy - buy ERC-20 token (params: walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
-/sell - sell ERC-20 token (params: walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
-/balance - get wallet ETH balance</br>
-/tokens - get wallet ERC-20 token balances</br>
-/gas - get current eth gas</br>
-/watch - start monitoring etherum wallets (params: walletAddress: Vec\<String\>)</br>
-/cancel - cancel current command</br>
+/help &emsp;&nbsp;&nbsp; list availabe commands</br>
+/buy &emsp;&nbsp;&nbsp;&nbsp; buy ERC-20 token (params: walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
+/sell &emsp;&emsp; sell ERC-20 token (params: walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
+/balance &nbsp;get wallet ETH balance</br>
+/tokens &nbsp;&nbsp; get wallet ERC-20 token balances</br>
+/gas &emsp;&emsp; get current eth gas</br>
+/watch &emsp; start monitoring etherum wallets (params: walletAddress: Vec\<String\>)</br>
+/cancel &nbsp;&nbsp;&nbsp; cancel current command</br>
