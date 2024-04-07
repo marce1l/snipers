@@ -10,77 +10,60 @@ mod alchemy;
 mod etherscan;
 mod honeypot;
 
-use alchemy::AlchemyAPI;
-use etherscan::EtherscanAPI;
+use alchemy::{AlchemyAPI, TokenBalance, TokenBalancesResult};
+use etherscan::{
+    EtherscanAPI, EtherscanEthPrices, EtherscanNormalTransaction, EtherscanTokenTransaction,
+};
 
 pub async fn get_eth_price() -> Result<f64, reqwest::Error> {
-    let response =
-        tokio::task::spawn_blocking(|| EtherscanAPI::<etherscan::EtherscanEthPrices>::eth_price())
-            .await
-            .expect("EtherscanAPI 'eth_price' method panicked");
-
-    match response {
+    match EtherscanAPI::<EtherscanEthPrices>::eth_price().await {
         Ok(response) => Ok(response.result.ethusd.parse::<f64>().unwrap()),
         Err(e) => Err(e.without_url()),
     }
 }
 
-pub async fn get_list_of_transactions(
+pub async fn get_normal_transactions(
     address: String,
-) -> Result<Vec<etherscan::EtherscanTransaction>, reqwest::Error> {
-    let response = tokio::task::spawn_blocking(|| {
-        EtherscanAPI::<Vec<etherscan::EtherscanTransaction>>::get_list_of_transactions(address)
-    })
-    .await
-    .expect("EtherscanAPI 'get_list_of_transactions' method panicked");
+) -> Result<Vec<EtherscanNormalTransaction>, reqwest::Error> {
+    match EtherscanAPI::<Vec<EtherscanNormalTransaction>>::get_normal_transactions(address).await {
+        Ok(response) => Ok(response.result),
+        Err(e) => Err(e.without_url()),
+    }
+}
 
-    match response {
+pub async fn get_token_transactions(
+    address: String,
+) -> Result<Vec<EtherscanTokenTransaction>, reqwest::Error> {
+    match EtherscanAPI::<Vec<EtherscanTokenTransaction>>::get_token_transactions(address).await {
         Ok(response) => Ok(response.result),
         Err(e) => Err(e.without_url()),
     }
 }
 
 pub async fn get_eth_gas() -> Result<f64, reqwest::Error> {
-    let response = tokio::task::spawn_blocking(|| AlchemyAPI::<String>::get_eth_gas())
-        .await
-        .expect("AlchemyAPI 'get_gas' method panicked");
-
-    match response {
+    match AlchemyAPI::<String>::get_eth_gas().await {
         Ok(gas) => Ok(to_gwei(&gas.result)),
         Err(e) => Err(e.without_url()),
     }
 }
 
 pub async fn get_eth_balance() -> Result<String, reqwest::Error> {
-    let response = tokio::task::spawn_blocking(|| AlchemyAPI::<String>::get_eth_balance())
-        .await
-        .expect("AlchemyAPI 'get_balance' method panicked");
-
-    match response {
+    match AlchemyAPI::<String>::get_eth_balance().await {
         Ok(balance) => Ok(format!("{}", to_eth(&balance.result))),
         Err(e) => Err(e.without_url()),
     }
 }
 
-// tokio runtime problem because honeypot api call
 pub async fn get_token_balances() -> Result<HashMap<String, HashMap<String, String>>, reqwest::Error>
 {
-    let response = {
-        tokio::task::spawn_blocking(|| {
-            AlchemyAPI::<alchemy::TokenBalancesResult>::get_token_balances()
-        })
-        .await
-        .expect("AlchemyAPI 'get_token_balances' method panicked")
-    };
-
-    match response {
+    match AlchemyAPI::<TokenBalancesResult>::get_token_balances().await {
         Ok(token_balances) => Ok(to_owned_tokens(token_balances.result.token_balances).await),
         Err(e) => Err(e.without_url()),
     }
 }
 
 async fn to_owned_tokens(
-    token_balances: Vec<alchemy::TokenBalance>,
+    token_balances: Vec<TokenBalance>,
 ) -> HashMap<String, HashMap<String, String>> {
     let mut tokens = HashMap::new();
 
@@ -178,7 +161,6 @@ impl CU {
         }
     }
 
-    // calls the 'start_of_month_reset_cu' function once a day
     fn start(&mut self) {
         let local_self = self.inner.clone();
 

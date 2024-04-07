@@ -53,11 +53,15 @@ mod utils;
 
 use std::env;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env::set_var("ALCHEMY_API", "");
-    env::set_var("TELOXIDE_TOKEN", "");
+    env::set_var(
+        "TELOXIDE_TOKEN",
+        "",
+    );
     env::set_var("ETH_ADDRESS", "");
     env::set_var("ETHERSCAN_API", "");
 
-    telegram::bot::main();
+    telegram::bot::run().await;
 }

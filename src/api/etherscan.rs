@@ -3,14 +3,13 @@ use serde::{de, Deserialize, Serialize};
 use std::env;
 
 impl<T: de::DeserializeOwned> EtherscanAPI<T> {
-    #[tokio::main]
     async fn send_request(url: String) -> Result<EtherscanAPI<T>, reqwest::Error> {
         let response: EtherscanAPI<T> = Client::new().get(url).send().await?.json().await?;
 
         Ok(response)
     }
 
-    pub fn eth_price() -> Result<EtherscanAPI<EtherscanEthPrices>, reqwest::Error> {
+    pub async fn eth_price() -> Result<EtherscanAPI<EtherscanEthPrices>, reqwest::Error> {
         let payload: String = format!(
             "https://api.etherscan.io/api?\
             module=stats\
@@ -19,12 +18,12 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
             env::var("ETHERSCAN_API").unwrap()
         );
 
-        EtherscanAPI::send_request(payload)
+        EtherscanAPI::send_request(payload).await
     }
 
-    pub fn get_list_of_transactions(
+    pub async fn get_normal_transactions(
         address: String,
-    ) -> Result<EtherscanAPI<Vec<EtherscanTransaction>>, reqwest::Error> {
+    ) -> Result<EtherscanAPI<Vec<EtherscanNormalTransaction>>, reqwest::Error> {
         let payload: String = format!(
             "https://api.etherscan.io/api?\
             module=account\
@@ -40,7 +39,28 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
             env::var("ETHERSCAN_API").unwrap()
         );
 
-        EtherscanAPI::send_request(payload)
+        EtherscanAPI::send_request(payload).await
+    }
+
+    pub async fn get_token_transactions(
+        address: String,
+    ) -> Result<EtherscanAPI<Vec<EtherscanTokenTransaction>>, reqwest::Error> {
+        let payload: String = format!(
+            "https://api.etherscan.io/api\
+            ?module=account\
+            &action=tokentx\
+            &address={}\
+            &page=1\
+            &offset=100\
+            &startblock=0\
+            &endblock=99999999\
+            &sort=asc\
+            &apikey={}",
+            address,
+            env::var("ETHERSCAN_API").unwrap()
+        );
+
+        EtherscanAPI::send_request(payload).await
     }
 }
 
@@ -61,7 +81,7 @@ pub struct EtherscanEthPrices {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EtherscanTransaction {
+pub struct EtherscanNormalTransaction {
     pub block_number: String,
     pub time_stamp: String,
     pub hash: String,
@@ -83,4 +103,28 @@ pub struct EtherscanTransaction {
     pub confirmations: String,
     pub method_id: String,
     pub function_name: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EtherscanTokenTransaction {
+    pub block_number: String,
+    pub time_stamp: String,
+    pub hash: String,
+    pub nonce: String,
+    pub block_hash: String,
+    pub from: String,
+    pub contract_address: String,
+    pub to: String,
+    pub value: String,
+    pub token_name: String,
+    pub token_symbol: String,
+    pub token_decimal: String,
+    pub transaction_index: String,
+    pub gas: String,
+    pub gas_price: String,
+    pub gas_used: String,
+    pub cumulative_gas_used: String,
+    pub input: String,
+    pub confirmations: String,
 }

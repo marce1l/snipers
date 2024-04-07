@@ -115,8 +115,7 @@ lazy_static! {
     static ref WATCHED_WALLETS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 }
 
-#[tokio::main]
-pub async fn main() {
+pub async fn run() {
     pretty_env_logger::init();
     log::info!("Starting command bot...");
 

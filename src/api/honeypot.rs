@@ -11,7 +11,7 @@ pub async fn get_token_info(contract: String) -> Result<TokenInfo, reqwest::Erro
         })
         .await
         .expect("AlchemyAPI 'get_token_balances' method panicked")
-    };
+    }.await;
 
     match response {
         Ok(honeypot_api) => Ok(TokenInfo {
@@ -45,7 +45,6 @@ pub struct TokenInfo {
 }
 
 impl HoneypotAPI {
-    #[tokio::main]
     async fn send_request(url: String) -> Result<HoneypotAPI, reqwest::Error> {
         let response: HoneypotAPI = Client::new().get(url).send().await?.json().await?;
 

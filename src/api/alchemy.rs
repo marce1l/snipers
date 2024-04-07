@@ -4,7 +4,6 @@ use serde_json;
 use std::{env, fmt};
 
 impl<T: de::DeserializeOwned> AlchemyAPI<T> {
-    #[tokio::main]
     async fn send_request(payload: AlchemyPayload) -> Result<AlchemyAPI<T>, reqwest::Error> {
         let response = Client::new()
             .post(format!(
@@ -22,7 +21,7 @@ impl<T: de::DeserializeOwned> AlchemyAPI<T> {
         Ok(response)
     }
 
-    pub fn get_eth_balance() -> Result<AlchemyAPI<String>, reqwest::Error> {
+    pub async fn get_eth_balance() -> Result<AlchemyAPI<String>, reqwest::Error> {
         let payload: AlchemyPayload = AlchemyPayload {
             params: Some(vec![
                 String::from(env::var("ETH_ADDRESS").unwrap()),
@@ -32,26 +31,26 @@ impl<T: de::DeserializeOwned> AlchemyAPI<T> {
             ..AlchemyPayload::default()
         };
 
-        AlchemyAPI::send_request(payload)
+        AlchemyAPI::send_request(payload).await
     }
 
-    pub fn get_eth_gas() -> Result<AlchemyAPI<String>, reqwest::Error> {
+    pub async fn get_eth_gas() -> Result<AlchemyAPI<String>, reqwest::Error> {
         let payload: AlchemyPayload = AlchemyPayload {
             method: String::from("eth_gasPrice"),
             ..AlchemyPayload::default()
         };
 
-        AlchemyAPI::send_request(payload)
+        AlchemyAPI::send_request(payload).await
     }
 
-    pub fn get_token_balances() -> Result<AlchemyAPI<TokenBalancesResult>, reqwest::Error> {
+    pub async fn get_token_balances() -> Result<AlchemyAPI<TokenBalancesResult>, reqwest::Error> {
         let payload: AlchemyPayload = AlchemyPayload {
             params: Some(vec![String::from(env::var("ETH_ADDRESS").unwrap())]),
             method: String::from("alchemy_getTokenBalances"),
             ..AlchemyPayload::default()
         };
 
-        AlchemyAPI::send_request(payload)
+        AlchemyAPI::send_request(payload).await
     }
 }
 
