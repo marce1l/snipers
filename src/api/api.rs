@@ -1,9 +1,10 @@
 use crate::{
-    telegram::bot::WATCHED_WALLETS,
+    telegram::bot::{self, WATCHED_WALLETS},
     utils::{hex_to_decimal, to_eth, to_gwei},
 };
 use chrono::{DateTime, Datelike};
 use std::{collections::HashMap, sync::Arc, thread};
+use teloxide::{types::ChatId, Bot};
 use tokio::sync::Mutex;
 
 mod alchemy;
@@ -11,9 +12,8 @@ mod etherscan;
 mod honeypot;
 
 use alchemy::{AlchemyAPI, TokenBalance, TokenBalancesResult};
-use etherscan::{
-    EtherscanAPI, EtherscanEthPrices, EtherscanNormalTransaction, EtherscanTokenTransaction,
-};
+pub use etherscan::EtherscanTokenTransaction;
+use etherscan::{EtherscanAPI, EtherscanEthPrices, EtherscanNormalTransaction};
 
 pub async fn get_eth_price() -> Result<f64, reqwest::Error> {
     match EtherscanAPI::<EtherscanEthPrices>::eth_price().await {
@@ -108,11 +108,12 @@ async fn to_owned_tokens(
     tokens
 }
 
-pub async fn watch_wallets() {
-    let mut last_transcations = HashMap::<String, u64>::new();
+pub async fn watch_wallets(bot: Bot) {
+    let mut last_transcations = HashMap::<ChatId, HashMap<String, u64>>::new();
 
     loop {
-        thread::sleep(chrono::Duration::try_seconds(60).unwrap().to_std().unwrap());
+        println!("\nNew iter\n");
+        thread::sleep(chrono::Duration::try_seconds(10).unwrap().to_std().unwrap());
         let watched_wallets = WATCHED_WALLETS.lock().await;
 
         if watched_wallets.is_empty() {
@@ -120,74 +121,100 @@ pub async fn watch_wallets() {
         };
 
         if last_transcations.is_empty() {
-            last_transcations = get_latest_token_transactions(watched_wallets.to_vec()).await;
+            last_transcations = get_latest_token_transactions(watched_wallets.to_owned()).await;
         } else {
-            let new_transactions =
-                check_for_new_token_transactions(watched_wallets.to_vec(), &last_transcations)
+            let new_transactions_by_chat_id =
+                check_for_new_token_transactions(watched_wallets.to_owned(), &last_transcations)
                     .await;
 
-            for (wallet, transactions) in new_transactions {
-                match &transactions {
-                    Some(val) => {
-                        // replace latest transaction block number
-                        last_transcations
-                            .insert(wallet, val[0].block_number.trim().parse::<u64>().unwrap());
+            for (chat_id, new_transactions) in new_transactions_by_chat_id {
+                for (wallet, transactions) in new_transactions {
+                    match &transactions {
+                        Some(val) => {
+                            // replace latest transaction block number
+                            last_transcations.insert(
+                                chat_id,
+                                HashMap::from([(
+                                    wallet.clone(),
+                                    val[0].block_number.trim().parse::<u64>().unwrap(),
+                                )]),
+                            );
 
-                        for v in val {
-                            // TODO: send telegram notification
+                            for v in val.iter().rev() {
+                                // TODO: send telegram notification
+                                bot::watched_wallet_notification(
+                                    bot.clone(),
+                                    chat_id,
+                                    wallet.clone(),
+                                    v,
+                                )
+                                .await;
+                            }
                         }
-                    }
-                    None => {}
-                };
+                        None => {}
+                    };
+                }
             }
         }
     }
 }
 
-async fn get_latest_token_transactions(wallets: Vec<String>) -> HashMap<String, u64> {
-    let mut token_transactions = HashMap::<String, u64>::new();
+async fn get_latest_token_transactions(
+    watched_wallets: HashMap<ChatId, Vec<String>>,
+) -> HashMap<ChatId, HashMap<String, u64>> {
+    let mut token_transactions = HashMap::<ChatId, HashMap<String, u64>>::new();
 
-    for w in wallets {
-        match get_token_transactions(w.to_owned()).await {
-            Ok(val) => {
-                token_transactions.insert(w, val[0].block_number.trim().parse::<u64>().unwrap());
-                continue;
-            }
-            Err(_) => continue,
-        };
+    for (chat_id, wallets) in watched_wallets {
+        for w in wallets {
+            match get_token_transactions(w.to_owned()).await {
+                Ok(val) => {
+                    token_transactions.insert(
+                        chat_id,
+                        HashMap::from([(w, val[0].block_number.trim().parse::<u64>().unwrap())]),
+                    );
+                    continue;
+                }
+                Err(_) => continue,
+            };
+        }
     }
 
     token_transactions
 }
 
 async fn check_for_new_token_transactions(
-    wallets: Vec<String>,
-    last_transactions: &HashMap<String, u64>,
-) -> HashMap<String, Option<Vec<EtherscanTokenTransaction>>> {
-    let mut token_transactions = HashMap::<String, Option<Vec<EtherscanTokenTransaction>>>::new();
+    watched_wallets: HashMap<ChatId, Vec<String>>,
+    last_transactions: &HashMap<ChatId, HashMap<String, u64>>,
+) -> HashMap<ChatId, HashMap<String, Option<Vec<EtherscanTokenTransaction>>>> {
+    let mut token_transactions =
+        HashMap::<ChatId, HashMap<String, Option<Vec<EtherscanTokenTransaction>>>>::new();
 
-    for w in wallets {
-        match get_token_transactions(w.to_owned()).await {
-            Ok(val) => {
-                let block_number = last_transactions.get(&w).unwrap();
-                let mut transactions = Vec::<EtherscanTokenTransaction>::new();
+    for (chat_id, wallets) in watched_wallets {
+        println!("check_for_new_token_transactions: {:#?}", &chat_id);
+        for w in wallets {
+            match get_token_transactions(w.to_owned()).await {
+                Ok(val) => {
+                    let block_number = last_transactions.get(&chat_id).unwrap().get(&w).unwrap();
+                    let mut transactions = Vec::<EtherscanTokenTransaction>::new();
 
-                for i in 0..val.len() {
-                    if &val[i].block_number.trim().parse::<u64>().unwrap() > block_number {
-                        transactions.push(val[i].clone());
-                    } else {
-                        if i == 0 {
-                            token_transactions.insert(w, None);
+                    for i in 0..val.len() {
+                        if &val[i].block_number.trim().parse::<u64>().unwrap() > block_number {
+                            transactions.push(val[i].clone());
                         } else {
-                            token_transactions.insert(w, Some(transactions));
-                        }
+                            if i == 0 {
+                                token_transactions.insert(chat_id, HashMap::from([(w, None)]));
+                            } else {
+                                token_transactions
+                                    .insert(chat_id, HashMap::from([(w, Some(transactions))]));
+                            }
 
-                        break;
+                            break;
+                        }
                     }
                 }
-            }
-            Err(_) => continue,
-        };
+                Err(_) => continue,
+            };
+        }
     }
 
     token_transactions

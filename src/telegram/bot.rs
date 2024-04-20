@@ -1,7 +1,7 @@
 use crate::api;
 use core::fmt;
 use lazy_static::lazy_static;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 use teloxide::{
     dispatching::{
         dialogue::{self, GetChatId, InMemStorage},
@@ -113,7 +113,8 @@ lazy_static! {
         slippage: None,
         order_type: OrderType::Buy
     });
-    pub static ref WATCHED_WALLETS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    pub static ref WATCHED_WALLETS: Mutex<HashMap<ChatId, Vec<String>>> =
+        Mutex::new(HashMap::<ChatId, Vec<String>>::new());
 }
 
 pub async fn run() {
@@ -121,6 +122,9 @@ pub async fn run() {
     log::info!("Starting command bot...");
 
     let bot = Bot::from_env();
+    let cloned_bot = bot.clone();
+
+    tokio::spawn(async move { api::watch_wallets(cloned_bot).await });
 
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![InMemStorage::<State>::new()])
@@ -202,7 +206,7 @@ async fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Op
     Some(trade_token)
 }
 
-async fn validate_watchwallets_args(args: &Vec<&str>) -> Option<Vec<String>> {
+async fn validate_watchwallets_args(chat_id: ChatId, args: &Vec<&str>) -> Option<Vec<String>> {
     let mut watched_wallets: Vec<String> = vec![];
 
     for wallet in args {
@@ -211,9 +215,9 @@ async fn validate_watchwallets_args(args: &Vec<&str>) -> Option<Vec<String>> {
             watched_wallets.push(String::from(wallet.to_owned()));
         }
     }
-
+    println!("validate_watchwallets_args: {:#?}", &chat_id);
     let mut ww = WATCHED_WALLETS.lock().await;
-    *ww = watched_wallets.clone();
+    *ww = HashMap::from([(chat_id, watched_wallets.clone())]);
 
     if watched_wallets.is_empty() {
         None
@@ -373,13 +377,13 @@ async fn get_eth_balance(bot: Bot, msg: Message) -> HandlerResult {
 async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
     let (_, args) =
         parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
-    let wallets = validate_watchwallets_args(&args).await;
+    let wallets = validate_watchwallets_args(msg.chat.id, &args).await;
 
     match wallets {
         Some(v) => {
             // TODO: handle watching wallets
 
-            let mut message: String = String::from("Wallets to watch:\n");
+            let mut message: String = String::from("Currently watched wallets:\n");
             let mut counter: u8 = 0;
 
             for wallet in v {
@@ -488,5 +492,22 @@ async fn help(bot: Bot, msg: Message) -> HandlerResult {
 async fn invalid_state(bot: Bot, msg: Message) -> HandlerResult {
     bot.send_message(msg.chat.id, "Type /help to see availabe commands.")
         .await?;
+    Ok(())
+}
+
+pub async fn watched_wallet_notification(
+    bot: Bot,
+    chat_id: ChatId,
+    wallet: String,
+    transaction: &api::EtherscanTokenTransaction,
+) -> HandlerResult {
+    // I don't understand why, but I need to do this for the send_messgae function to accept the ChatId...
+    let ch: ChatId = chat_id.into();
+
+    bot.send_message(
+        ch,
+        format!("wallet: {}\ntransaction: {}", wallet, transaction.hash),
+    )
+    .await?;
     Ok(())
 }
