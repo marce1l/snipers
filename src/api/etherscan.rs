@@ -33,7 +33,7 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
             &endblock=99999999\
             &page=1\
             &offset=25\
-            &sort=asc\
+            &sort=desc\
             &apikey={}",
             address,
             env::var("ETHERSCAN_API").unwrap()
@@ -54,7 +54,7 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
             &offset=100\
             &startblock=0\
             &endblock=99999999\
-            &sort=asc\
+            &sort=desc\
             &apikey={}",
             address,
             env::var("ETHERSCAN_API").unwrap()
@@ -79,7 +79,7 @@ pub struct EtherscanEthPrices {
     pub ethusd_timestamp: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EtherscanNormalTransaction {
     pub block_number: String,
@@ -105,7 +105,7 @@ pub struct EtherscanNormalTransaction {
     pub function_name: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EtherscanTokenTransaction {
     pub block_number: String,

@@ -1,7 +1,7 @@
 use crate::api;
 use core::fmt;
 use lazy_static::lazy_static;
-use std::{str::FromStr, sync::Mutex};
+use std::str::FromStr;
 use teloxide::{
     dispatching::{
         dialogue::{self, GetChatId, InMemStorage},
@@ -12,6 +12,7 @@ use teloxide::{
     utils::command::{parse_command, BotCommands},
 };
 use thousands::Separable;
+use tokio::sync::Mutex;
 
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -112,7 +113,7 @@ lazy_static! {
         slippage: None,
         order_type: OrderType::Buy
     });
-    static ref WATCHED_WALLETS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    pub static ref WATCHED_WALLETS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 }
 
 pub async fn run() {
@@ -166,7 +167,7 @@ fn make_yes_no_keyboard() -> InlineKeyboardMarkup {
     InlineKeyboardMarkup::new(buttons)
 }
 
-fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<TradeToken> {
+async fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<TradeToken> {
     let mut trade_token: TradeToken = TradeToken {
         contract: None,
         amount: None,
@@ -195,13 +196,13 @@ fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Option<T
         Err(_) => None,
     };
 
-    let mut tt = TRADE_TOKEN.lock().unwrap();
+    let mut tt = TRADE_TOKEN.lock().await;
     *tt = trade_token.clone();
 
     Some(trade_token)
 }
 
-fn validate_watchwallets_args(args: &Vec<&str>) -> Option<Vec<String>> {
+async fn validate_watchwallets_args(args: &Vec<&str>) -> Option<Vec<String>> {
     let mut watched_wallets: Vec<String> = vec![];
 
     for wallet in args {
@@ -211,7 +212,7 @@ fn validate_watchwallets_args(args: &Vec<&str>) -> Option<Vec<String>> {
         }
     }
 
-    let mut ww = WATCHED_WALLETS.lock().unwrap();
+    let mut ww = WATCHED_WALLETS.lock().await;
     *ww = watched_wallets.clone();
 
     if watched_wallets.is_empty() {
@@ -232,7 +233,8 @@ async fn trade_token(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerRes
     let trade_token: Option<TradeToken> = validate_tradetoken_args(
         &args,
         OrderType::from_str(command.to_lowercase().as_str()).unwrap(),
-    );
+    )
+    .await;
     let mut incorrect_params: bool = false;
 
     match trade_token {
@@ -371,7 +373,7 @@ async fn get_eth_balance(bot: Bot, msg: Message) -> HandlerResult {
 async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
     let (_, args) =
         parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
-    let wallets = validate_watchwallets_args(&args);
+    let wallets = validate_watchwallets_args(&args).await;
 
     match wallets {
         Some(v) => {

@@ -1,10 +1,10 @@
-use crate::utils::{hex_to_decimal, to_eth, to_gwei};
-use chrono::{DateTime, Datelike};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    thread,
+use crate::{
+    telegram::bot::WATCHED_WALLETS,
+    utils::{hex_to_decimal, to_eth, to_gwei},
 };
+use chrono::{DateTime, Datelike};
+use std::{collections::HashMap, sync::Arc, thread};
+use tokio::sync::Mutex;
 
 mod alchemy;
 mod etherscan;
@@ -86,10 +86,7 @@ async fn to_owned_tokens(
                                 ),
                             ),
                             // TODO: need another api for fetching a token current price
-                            (
-                                String::from("balance_usd"),
-                                format!("{}", to_eth(&String::from("0x0000"))),
-                            ),
+                            (String::from("balance_usd"), format!("{}", to_eth("0x0000"))),
                         ]),
                     );
                 }
@@ -109,6 +106,91 @@ async fn to_owned_tokens(
     }
 
     tokens
+}
+
+pub async fn watch_wallets() {
+    let mut last_transcations = HashMap::<String, u64>::new();
+
+    loop {
+        thread::sleep(chrono::Duration::try_seconds(60).unwrap().to_std().unwrap());
+        let watched_wallets = WATCHED_WALLETS.lock().await;
+
+        if watched_wallets.is_empty() {
+            continue;
+        };
+
+        if last_transcations.is_empty() {
+            last_transcations = get_latest_token_transactions(watched_wallets.to_vec()).await;
+        } else {
+            let new_transactions =
+                check_for_new_token_transactions(watched_wallets.to_vec(), &last_transcations)
+                    .await;
+
+            for (wallet, transactions) in new_transactions {
+                match &transactions {
+                    Some(val) => {
+                        // replace latest transaction block number
+                        last_transcations
+                            .insert(wallet, val[0].block_number.trim().parse::<u64>().unwrap());
+
+                        for v in val {
+                            // TODO: send telegram notification
+                        }
+                    }
+                    None => {}
+                };
+            }
+        }
+    }
+}
+
+async fn get_latest_token_transactions(wallets: Vec<String>) -> HashMap<String, u64> {
+    let mut token_transactions = HashMap::<String, u64>::new();
+
+    for w in wallets {
+        match get_token_transactions(w.to_owned()).await {
+            Ok(val) => {
+                token_transactions.insert(w, val[0].block_number.trim().parse::<u64>().unwrap());
+                continue;
+            }
+            Err(_) => continue,
+        };
+    }
+
+    token_transactions
+}
+
+async fn check_for_new_token_transactions(
+    wallets: Vec<String>,
+    last_transactions: &HashMap<String, u64>,
+) -> HashMap<String, Option<Vec<EtherscanTokenTransaction>>> {
+    let mut token_transactions = HashMap::<String, Option<Vec<EtherscanTokenTransaction>>>::new();
+
+    for w in wallets {
+        match get_token_transactions(w.to_owned()).await {
+            Ok(val) => {
+                let block_number = last_transactions.get(&w).unwrap();
+                let mut transactions = Vec::<EtherscanTokenTransaction>::new();
+
+                for i in 0..val.len() {
+                    if &val[i].block_number.trim().parse::<u64>().unwrap() > block_number {
+                        transactions.push(val[i].clone());
+                    } else {
+                        if i == 0 {
+                            token_transactions.insert(w, None);
+                        } else {
+                            token_transactions.insert(w, Some(transactions));
+                        }
+
+                        break;
+                    }
+                }
+            }
+            Err(_) => continue,
+        };
+    }
+
+    token_transactions
 }
 
 /*
@@ -136,16 +218,16 @@ impl CUInner {
         }
     }
 
-    fn add_cu(&self, cu: u32) {
-        *self.used_cu.lock().unwrap() += cu;
+    async fn add_cu(&self, cu: u32) {
+        *self.used_cu.lock().await += cu;
     }
 
-    fn start_of_month_reset_cu(&self) {
+    async fn start_of_month_reset_cu(&self) {
         let utc_date: DateTime<chrono::Utc> = chrono::Utc::now();
-        let mut days_since_reset = self.days_since_reset.lock().unwrap();
+        let mut days_since_reset = self.days_since_reset.lock().await;
 
         if utc_date.day() == 1 || (*days_since_reset >= 28 && utc_date.day() == 2) {
-            let mut used_cu = self.used_cu.lock().unwrap();
+            let mut used_cu = self.used_cu.lock().await;
             *used_cu = 0;
             *days_since_reset = 0;
         } else {
@@ -164,10 +246,12 @@ impl CU {
     fn start(&mut self) {
         let local_self = self.inner.clone();
 
-        thread::spawn(move || loop {
-            thread::sleep(chrono::Duration::try_days(1).unwrap().to_std().unwrap());
+        tokio::spawn(async move {
+            loop {
+                thread::sleep(chrono::Duration::try_days(1).unwrap().to_std().unwrap());
 
-            local_self.start_of_month_reset_cu();
+                local_self.start_of_month_reset_cu().await;
+            }
         });
     }
 }
