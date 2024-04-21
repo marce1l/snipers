@@ -112,7 +112,6 @@ pub async fn watch_wallets(bot: Bot) {
     let mut last_transcations = HashMap::<ChatId, HashMap<String, u64>>::new();
 
     loop {
-        println!("\nNew iter\n");
         thread::sleep(chrono::Duration::try_seconds(10).unwrap().to_std().unwrap());
         let watched_wallets = WATCHED_WALLETS.lock().await;
 
@@ -190,7 +189,6 @@ async fn check_for_new_token_transactions(
         HashMap::<ChatId, HashMap<String, Option<Vec<EtherscanTokenTransaction>>>>::new();
 
     for (chat_id, wallets) in watched_wallets {
-        println!("check_for_new_token_transactions: {:#?}", &chat_id);
         for w in wallets {
             match get_token_transactions(w.to_owned()).await {
                 Ok(val) => {

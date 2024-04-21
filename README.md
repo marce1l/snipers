@@ -1,18 +1,20 @@
-# Telegram sniping bot
+# snipers
 
-A telegram bot written in rust to make ERC-20 token buying and selling simpler and faster. While providing useful safety checks and utilities when making transactions.
+A telegram bot written in rust making ERC-20 token buying and selling simpler, safer and faster. Providing useful safety checks and other utilities all in one place.
 
 ## Bot functionality
 
 - Buy and sell ERC-20 tokens quickly and easily (on-chain transactions not yet implemented)
 - Check current ERC-20 tokens and ETH balances
-- Monitor ETH wallets for new ERC-20 token transactions (notifications not yet implemented)
+- Monitor ETH wallets for new ERC-20 token transactions
 - Check ETH gas fees and estimated uniswap transaction costs
 
 ## Setting up your environment
 
-To use this bot, you have to self host it.</br>
+To use this bot, you have to self host it.<br>
 There are a few API keys you will need when setting up your environment, making sure the bot works.
+
+> You can use every API listed here for free, if you don't go over their free tier
 
 ### Environment variables
 

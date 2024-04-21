@@ -1,7 +1,12 @@
 use crate::api;
+use chrono::{DateTime, Utc};
 use core::fmt;
 use lazy_static::lazy_static;
-use std::{collections::HashMap, str::FromStr};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    time::{Duration, UNIX_EPOCH},
+};
 use teloxide::{
     dispatching::{
         dialogue::{self, GetChatId, InMemStorage},
@@ -215,7 +220,7 @@ async fn validate_watchwallets_args(chat_id: ChatId, args: &Vec<&str>) -> Option
             watched_wallets.push(String::from(wallet.to_owned()));
         }
     }
-    println!("validate_watchwallets_args: {:#?}", &chat_id);
+
     let mut ww = WATCHED_WALLETS.lock().await;
     *ww = HashMap::from([(chat_id, watched_wallets.clone())]);
 
@@ -504,9 +509,17 @@ pub async fn watched_wallet_notification(
     // I don't understand why, but I need to do this for the send_messgae function to accept the ChatId...
     let ch: ChatId = chat_id.into();
 
+    let epoch_time =
+        UNIX_EPOCH + Duration::from_secs(transaction.time_stamp.parse::<u64>().unwrap());
+    let datetime = DateTime::<Utc>::from(epoch_time);
+    let timestamp = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
+
     bot.send_message(
         ch,
-        format!("wallet: {}\ntransaction: {}", wallet, transaction.hash),
+        format!(
+            "🚨🚨🚨 New transaction from watched wallet 🚨🚨🚨\n\n🔎 Wallet: {}\n\n⏰ Timestamp: {}\n🔗 Transaction hash: {}\n💎 Token symbol: {}\n💎 Token name: {}\n📄 Contract: {}",
+            wallet, timestamp, transaction.hash, transaction.token_symbol, transaction.token_name, transaction.contract_address
+        ),
     )
     .await?;
     Ok(())
