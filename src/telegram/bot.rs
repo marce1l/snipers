@@ -517,7 +517,7 @@ pub async fn watched_wallet_notification(
     bot.send_message(
         ch,
         format!(
-            "🚨🚨🚨 New transaction from watched wallet 🚨🚨🚨\n\n🔎 Wallet: {}\n\n⏰ Timestamp: {}\n🔗 Transaction hash: {}\n💎 Token symbol: {}\n💎 Token name: {}\n📄 Contract: {}",
+            "🚨🚨🚨 New transaction 🚨🚨🚨\n\n🔎 Monitored wallet: {}\n\n⏰ Timestamp (UTC): {}\n🔗 Transaction hash: {}\n💎 Token symbol: {}\n💎 Token name: {}\n📄 Contract: {}",
             wallet, timestamp, transaction.hash, transaction.token_symbol, transaction.token_name, transaction.contract_address
         ),
     )

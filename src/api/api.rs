@@ -130,18 +130,26 @@ pub async fn watch_wallets(bot: Bot) {
                 for (wallet, transactions) in new_transactions {
                     match &transactions {
                         Some(val) => {
-                            // replace latest transaction block number
-                            last_transcations.insert(
-                                chat_id,
-                                HashMap::from([(
-                                    wallet.clone(),
-                                    val[0].block_number.trim().parse::<u64>().unwrap(),
-                                )]),
-                            );
+                            // replace latest transaction timestamp
+                            last_transcations
+                                .entry(chat_id)
+                                .and_modify(|map| {
+                                    map.insert(
+                                        wallet.clone(),
+                                        val[0].time_stamp.trim().parse::<u64>().unwrap_or(0),
+                                    );
+                                    ()
+                                })
+                                .or_insert_with(|| {
+                                    HashMap::from([(
+                                        wallet.clone(),
+                                        val[0].time_stamp.trim().parse::<u64>().unwrap_or(0),
+                                    )])
+                                });
 
                             for v in val.iter().rev() {
                                 // TODO: send telegram notification
-                                bot::watched_wallet_notification(
+                                let _ = bot::watched_wallet_notification(
                                     bot.clone(),
                                     chat_id,
                                     wallet.clone(),
@@ -150,7 +158,7 @@ pub async fn watch_wallets(bot: Bot) {
                                 .await;
                             }
                         }
-                        None => {}
+                        None => continue,
                     };
                 }
             }
@@ -167,13 +175,26 @@ async fn get_latest_token_transactions(
         for w in wallets {
             match get_token_transactions(w.to_owned()).await {
                 Ok(val) => {
-                    token_transactions.insert(
-                        chat_id,
-                        HashMap::from([(w, val[0].block_number.trim().parse::<u64>().unwrap())]),
-                    );
+                    token_transactions
+                        .entry(chat_id)
+                        .and_modify(|map| {
+                            map.insert(
+                                w.to_owned(),
+                                val[0].time_stamp.trim().parse::<u64>().unwrap_or(0),
+                            );
+                            ()
+                        })
+                        .or_insert_with(|| {
+                            HashMap::from([(
+                                w,
+                                val[0].time_stamp.trim().parse::<u64>().unwrap_or(0),
+                            )])
+                        });
                     continue;
                 }
-                Err(_) => continue,
+                Err(_) => {
+                    continue;
+                }
             };
         }
     }
@@ -192,18 +213,33 @@ async fn check_for_new_token_transactions(
         for w in wallets {
             match get_token_transactions(w.to_owned()).await {
                 Ok(val) => {
-                    let block_number = last_transactions.get(&chat_id).unwrap().get(&w).unwrap();
+                    let time_stamp = last_transactions
+                        .get(&chat_id)
+                        .unwrap()
+                        .get(&w)
+                        .unwrap_or(&0);
                     let mut transactions = Vec::<EtherscanTokenTransaction>::new();
 
                     for i in 0..val.len() {
-                        if &val[i].block_number.trim().parse::<u64>().unwrap() > block_number {
+                        if &val[i].time_stamp.trim().parse::<u64>().unwrap_or(0) > time_stamp {
                             transactions.push(val[i].clone());
                         } else {
                             if i == 0 {
-                                token_transactions.insert(chat_id, HashMap::from([(w, None)]));
+                                token_transactions
+                                    .entry(chat_id)
+                                    .and_modify(|map| {
+                                        map.insert(w.clone(), None);
+                                        ()
+                                    })
+                                    .or_insert_with(|| HashMap::from([(w, None)]));
                             } else {
                                 token_transactions
-                                    .insert(chat_id, HashMap::from([(w, Some(transactions))]));
+                                    .entry(chat_id)
+                                    .and_modify(|map| {
+                                        map.insert(w.clone(), Some(transactions.clone()));
+                                        ()
+                                    })
+                                    .or_insert_with(|| HashMap::from([(w, Some(transactions))]));
                             }
 
                             break;
