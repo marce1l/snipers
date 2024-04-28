@@ -28,7 +28,7 @@ pub fn is_valid_eth_address(address: &str) -> bool {
 
     // if address has capital letters checksum can be calculated to verify address
     if address != address.to_lowercase() {
-        eth_address_checksum("0x9093c2Df5B6dD4AE9261CFA54cc8dC570c06DA2f".trim_start_matches("0x"))
+        eth_address_checksum(address.trim_start_matches("0x"))
     } else {
         return true;
     }

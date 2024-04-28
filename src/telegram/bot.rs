@@ -1,4 +1,4 @@
-use crate::api;
+use crate::{api, utils};
 use chrono::{DateTime, Utc};
 use core::fmt;
 use lazy_static::lazy_static;
@@ -107,6 +107,8 @@ enum Command {
     Gas,
     #[command(description = "start monitoring etherum wallets")]
     Watch(String),
+    #[command(description = "scan an ERC-20 token")]
+    Scan(String),
     #[command(description = "cancel current command")]
     Cancel,
 }
@@ -149,7 +151,8 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
                 .branch(case![Command::Sell(tt)].endpoint(trade_token))
                 .branch(case![Command::Balance].endpoint(get_eth_balance))
                 .branch(case![Command::Tokens].endpoint(get_erc20_balances))
-                .branch(case![Command::Gas].endpoint(get_eth_gas)),
+                .branch(case![Command::Gas].endpoint(get_eth_gas))
+                .branch(case![Command::Scan(t)].endpoint(scan_token)),
         )
         .branch(case![Command::Watch(w)].endpoint(watch_wallets))
         .branch(case![Command::Help].endpoint(help))
@@ -188,8 +191,7 @@ async fn validate_tradetoken_args(args: &Vec<&str>, order_type: OrderType) -> Op
         return None;
     }
 
-    // etherum addresses are 42 characters long (including the 0x prefix)
-    if args[0].len() == 42 && args[0].starts_with("0x") {
+    if utils::is_valid_eth_address(args[0]) {
         trade_token.contract = Some(String::from(args[0]));
     } else {
         trade_token.contract = None;
@@ -215,8 +217,7 @@ async fn validate_watchwallets_args(chat_id: ChatId, args: &Vec<&str>) -> Option
     let mut watched_wallets: Vec<String> = vec![];
 
     for wallet in args {
-        // etherum addresses are 42 characters long (including the 0x prefix)
-        if wallet.starts_with("0x") && wallet.len() == 42 {
+        if utils::is_valid_eth_address(wallet) {
             watched_wallets.push(String::from(wallet.to_owned()));
         }
     }
@@ -310,16 +311,16 @@ async fn confirm_transaction(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -
     let chat_id = q.chat_id().unwrap();
 
     match q.clone().data {
-        Some(d) => {
+        Some(answear) => {
             bot.answer_callback_query(q.id).await?;
 
             bot.delete_message(chat_id, q.message.unwrap().id).await?;
 
-            if d == "yes" {
+            if answear == "yes" {
                 bot.send_message(chat_id, format!("Transaction executed!"))
                     .await?;
                 // TODO: handle transaction
-            } else if d == "no" {
+            } else if answear == "no" {
                 bot.send_message(chat_id, format!("Transaction was not executed!"))
                     .await?;
             }
@@ -385,13 +386,11 @@ async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
     let wallets = validate_watchwallets_args(msg.chat.id, &args).await;
 
     match wallets {
-        Some(v) => {
-            // TODO: handle watching wallets
-
+        Some(value) => {
             let mut message: String = String::from("Currently watched wallets:\n");
             let mut counter: u8 = 0;
 
-            for wallet in v {
+            for wallet in value {
                 counter = counter + 1;
                 message.push_str(&format!("\n{}. {}", counter, &wallet));
             }
@@ -522,5 +521,75 @@ pub async fn watched_wallet_notification(
         ),
     )
     .await?;
+    Ok(())
+}
+
+async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
+    let loading_message_id = loading_message(&bot, &msg).await;
+    let contract = parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username())
+        .unwrap()
+        .1
+        .join("");
+
+    if utils::is_valid_eth_address(contract.trim()) {
+        let response = api::get_token_info(contract.trim().to_owned()).await;
+
+        match response {
+            Ok(token_info) => {
+                let mut warning = false;
+                let mut info = format!(
+                    "Scan result for: \n📄 {}\n\n💎 Name: {}\n💎 Symbol: {}\n⚖️ Buy tax: {}\n⚖️ Sell tax: {}\n💰 Liquidity: ${}\n\n🚨 Warnings:",
+                    contract.trim(), token_info.name, token_info.symbol, token_info.buy_tax, token_info.sell_tax, token_info.liquidity.floor().separate_with_commas()
+                );
+
+                if token_info.is_honeypot {
+                    info = format!(
+                        "{}\n❌ {}",
+                        info,
+                        token_info
+                            .honeypot_reason
+                            .unwrap_or(String::from("TOKEN IS A HONEYPOT"))
+                    );
+                    warning = true;
+                }
+
+                if token_info.flags_description.is_some() {
+                    for desc in token_info.flags_description.clone().unwrap() {
+                        info = format!("{}\n❌ {}", info, desc);
+                    }
+                    warning = true;
+                }
+
+                if token_info.has_proxy_calls.unwrap_or(false) {
+                    info = info + "\n❌ Contract has proxy calls!";
+                    warning = true;
+                }
+
+                if !token_info.is_open_source.unwrap_or(true) {
+                    info = info + "\n❌ Contract is not open source!";
+                    warning = true;
+                }
+
+                if !warning {
+                    info = info + "\n✅ There were no warnings found";
+                }
+
+                bot.delete_message(msg.chat.id, loading_message_id).await?;
+                bot.send_message(msg.chat.id, info).await?;
+            }
+            Err(e) => {
+                bot.send_message(
+                    msg.chat.id,
+                    format!("Something went wrong... {}\n\nPlease try again", e),
+                )
+                .await?;
+            }
+        }
+    } else {
+        bot.delete_message(msg.chat.id, loading_message_id).await?;
+        bot.send_message(msg.chat.id, format!("The submitted contract is not valid!"))
+            .await?;
+    }
+
     Ok(())
 }

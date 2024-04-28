@@ -11,7 +11,8 @@ pub async fn get_token_info(contract: String) -> Result<TokenInfo, reqwest::Erro
         })
         .await
         .expect("AlchemyAPI 'get_token_balances' method panicked")
-    }.await;
+    }
+    .await;
 
     match response {
         Ok(honeypot_api) => Ok(TokenInfo {
@@ -25,6 +26,9 @@ pub async fn get_token_info(contract: String) -> Result<TokenInfo, reqwest::Erro
             buy_tax: HoneypotAPI::get_token_tax(&honeypot_api).0,
             sell_tax: HoneypotAPI::get_token_tax(&honeypot_api).1,
             liquidity: HoneypotAPI::get_pair_liquidity(&honeypot_api),
+            is_open_source: HoneypotAPI::get_contract_open_source(&honeypot_api),
+            has_proxy_calls: HoneypotAPI::get_has_proxy_calls(&honeypot_api),
+            flags_description: HoneypotAPI::get_flags_description(&honeypot_api),
         }),
         Err(e) => Err(e.without_url()),
     }
@@ -42,6 +46,9 @@ pub struct TokenInfo {
     pub buy_tax: f32,
     pub sell_tax: f32,
     pub liquidity: f32,
+    pub is_open_source: Option<bool>,
+    pub has_proxy_calls: Option<bool>,
+    pub flags_description: Option<Vec<String>>,
 }
 
 impl HoneypotAPI {
@@ -98,6 +105,39 @@ impl HoneypotAPI {
     fn get_pair_type(api: &HoneypotAPI) -> String {
         api.pair.pair.pair_type.to_owned()
     }
+
+    fn get_contract_open_source(api: &HoneypotAPI) -> Option<bool> {
+        match api.contract_code.as_ref() {
+            Some(contract_code) => Some(contract_code.open_source),
+            None => None,
+        }
+    }
+
+    fn get_has_proxy_calls(api: &HoneypotAPI) -> Option<bool> {
+        match api.contract_code.as_ref() {
+            Some(contract_code) => Some(contract_code.has_proxy_calls),
+            None => None,
+        }
+    }
+
+    fn get_flags_description(api: &HoneypotAPI) -> Option<Vec<String>> {
+        match api.summary.flags.as_ref() {
+            Some(flags) => {
+                // If token risk is low the flags field arrives empty
+                if !flags.is_empty() {
+                    let mut desc: Vec<String> = vec![];
+                    for f in flags {
+                        desc.push(f.description.to_owned());
+                    }
+
+                    Some(desc)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -105,6 +145,7 @@ impl HoneypotAPI {
 struct HoneypotAPI {
     token: Token,
     with_token: WithToken,
+    summary: Summary,
     simulation_success: bool,
     simulation_error: Option<String>,
     honeypot_result: Option<HoneypotResult>,
@@ -136,6 +177,23 @@ struct WithToken {
     decimals: u8,
     address: String,
     total_holders: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Summary {
+    risk: String,
+    risk_level: Option<u16>,
+    flags: Option<Vec<Flag>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Flag {
+    flag: String,
+    description: String,
+    severity: String,
+    severity_index: u16,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

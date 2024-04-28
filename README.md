@@ -39,10 +39,11 @@ You need to set the following environment variables.
 > Command parameters should be seperated by one whitespace
 
 /help &emsp;&nbsp;&nbsp; list availabe commands</br>
-/buy &emsp;&nbsp;&nbsp;&nbsp; buy ERC-20 token (params: walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
-/sell &emsp;&emsp; sell ERC-20 token (params: walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
+/buy &emsp;&nbsp;&nbsp;&nbsp; buy ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
+/sell &emsp;&emsp; sell ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
 /balance &nbsp;get wallet ETH balance</br>
 /tokens &nbsp;&nbsp; get wallet ERC-20 token balances</br>
 /gas &emsp;&emsp; get current eth gas</br>
-/watch &emsp; start monitoring etherum wallets (params: walletAddress: Vec\<String\>)</br>
+/watch &emsp; start monitoring etherum wallets (walletAddress: Vec\<String\>)</br>
+/scan &emsp;&nbsp;&nbsp; scan an ERC-20 token (contract: String)</br>
 /cancel &nbsp;&nbsp;&nbsp; cancel current command</br>

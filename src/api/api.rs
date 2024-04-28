@@ -14,6 +14,7 @@ mod honeypot;
 use alchemy::{AlchemyAPI, TokenBalance, TokenBalancesResult};
 pub use etherscan::EtherscanTokenTransaction;
 use etherscan::{EtherscanAPI, EtherscanEthPrices, EtherscanNormalTransaction};
+pub use honeypot::TokenInfo;
 
 pub async fn get_eth_price() -> Result<f64, reqwest::Error> {
     match EtherscanAPI::<EtherscanEthPrices>::eth_price().await {
@@ -58,6 +59,13 @@ pub async fn get_token_balances() -> Result<HashMap<String, HashMap<String, Stri
 {
     match AlchemyAPI::<TokenBalancesResult>::get_token_balances().await {
         Ok(token_balances) => Ok(to_owned_tokens(token_balances.result.token_balances).await),
+        Err(e) => Err(e.without_url()),
+    }
+}
+
+pub async fn get_token_info(contract: String) -> Result<TokenInfo, reqwest::Error> {
+    match honeypot::get_token_info(contract).await {
+        Ok(token_info) => Ok(token_info),
         Err(e) => Err(e.without_url()),
     }
 }
