@@ -24,6 +24,7 @@ You need to set the following environment variables.
     TELOXIDE_TOKEN="YourTelegramBotApiKey"
     ETHERSCAN_API="YourAPIKey"
     ALCHEMY_API="YourAPIKey"
+    MORALIS_API="YourAPIKey"
 
 - For the **ETH_ADDRESS**, you should add your ethereum address.<br>
   Used for getting wallet balance, executing transactions
@@ -33,17 +34,19 @@ You need to set the following environment variables.
   Used for getting the current price of ethereum
 - For the **ALCHEMY_API**, you can follow [this tutorial](https://docs.alchemy.com/docs/alchemy-quickstart-guide#1key-create-an-alchemy-key).<br>
   Used for getting ERC-20 token balances, ETH balance, ETH gas fee
+- For the **MORALIS_API**, you can follow [this tutorial](https://docs.moralis.io/web3-data-api/evm/get-your-api-key).<br>
+  Used for getting ERC-20 token prices, top token holders
 
 ## Commands
 
 > Command parameters should be seperated by one whitespace
 
-/help &emsp;&nbsp;&nbsp; list availabe commands</br>
-/buy &emsp;&nbsp;&nbsp;&nbsp; buy ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
-/sell &emsp;&emsp; sell ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)</br>
-/balance &nbsp;get wallet ETH balance</br>
-/tokens &nbsp;&nbsp; get wallet ERC-20 token balances</br>
-/gas &emsp;&emsp; get current eth gas</br>
-/watch &emsp; start monitoring etherum wallets (walletAddress: Vec\<String\>)</br>
-/scan &emsp;&nbsp;&nbsp; scan an ERC-20 token (contract: String)</br>
-/cancel &nbsp;&nbsp;&nbsp; cancel current command</br>
+/help &emsp;&nbsp;&nbsp; list availabe commands<br>
+/buy &emsp;&nbsp;&nbsp;&nbsp; buy ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)<br>
+/sell &emsp;&emsp; sell ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)<br>
+/balance &nbsp;get wallet ETH balance<br>
+/tokens &nbsp;&nbsp; get wallet ERC-20 token balances<br>
+/gas &emsp;&emsp; get current eth gas<br>
+/watch &emsp; start monitoring etherum wallets (walletAddress: Vec\<String\>)<br>
+/scan &emsp;&nbsp;&nbsp; scan an ERC-20 token (contract: String)<br>
+/cancel &nbsp;&nbsp;&nbsp; cancel current command<br>

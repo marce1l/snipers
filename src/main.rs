@@ -56,12 +56,10 @@ use std::env;
 #[tokio::main]
 async fn main() {
     env::set_var("ALCHEMY_API", "");
-    env::set_var(
-        "TELOXIDE_TOKEN",
-        "",
-    );
+    env::set_var("TELOXIDE_TOKEN", "");
     env::set_var("ETH_ADDRESS", "");
     env::set_var("ETHERSCAN_API", "");
+    env::set_var("MORALIS_API", "");
 
     telegram::bot::run().await;
 }

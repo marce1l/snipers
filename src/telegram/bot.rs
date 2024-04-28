@@ -80,11 +80,17 @@ impl fmt::Display for TradeToken {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Settings {
+    hide_zero_token_balances: bool,
+}
+
 #[derive(Clone, Default)]
 pub enum State {
     #[default]
     Start,
     Confirm,
+    Settings,
 }
 
 #[derive(BotCommands, Clone, Debug)]
@@ -109,11 +115,16 @@ enum Command {
     Watch(String),
     #[command(description = "scan an ERC-20 token")]
     Scan(String),
+    #[command(description = "change bot settings")]
+    Settings,
     #[command(description = "cancel current command")]
     Cancel,
 }
 
 lazy_static! {
+    static ref SETTINGS: Mutex<Settings> = Mutex::new(Settings {
+        hide_zero_token_balances: false
+    });
     static ref TRADE_TOKEN: Mutex<TradeToken> = Mutex::new(TradeToken {
         contract: None,
         amount: None,
@@ -152,7 +163,8 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
                 .branch(case![Command::Balance].endpoint(get_eth_balance))
                 .branch(case![Command::Tokens].endpoint(get_erc20_balances))
                 .branch(case![Command::Gas].endpoint(get_eth_gas))
-                .branch(case![Command::Scan(t)].endpoint(scan_token)),
+                .branch(case![Command::Scan(t)].endpoint(scan_token))
+                .branch(case![Command::Settings].endpoint(change_settings)),
         )
         .branch(case![Command::Watch(w)].endpoint(watch_wallets))
         .branch(case![Command::Help].endpoint(help))
@@ -162,8 +174,9 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(command_handler)
         .branch(dptree::endpoint(invalid_state));
 
-    let callback_query_handler =
-        Update::filter_callback_query().branch(case![State::Confirm].endpoint(confirm_transaction));
+    let callback_query_handler = Update::filter_callback_query()
+        .branch(case![State::Confirm].endpoint(confirm_transaction))
+        .branch(case![State::Settings].endpoint(confirm_settings));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
@@ -175,6 +188,15 @@ fn make_yes_no_keyboard() -> InlineKeyboardMarkup {
         InlineKeyboardButton::callback("No", "no"),
         InlineKeyboardButton::callback("Yes", "yes"),
     ]];
+
+    InlineKeyboardMarkup::new(buttons)
+}
+
+fn make_settings_keyboard() -> InlineKeyboardMarkup {
+    let buttons: Vec<Vec<InlineKeyboardButton>> = vec![vec![InlineKeyboardButton::callback(
+        "Hide zero token balances",
+        "hide_zero_balance",
+    )]];
 
     InlineKeyboardMarkup::new(buttons)
 }
@@ -311,16 +333,16 @@ async fn confirm_transaction(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -
     let chat_id = q.chat_id().unwrap();
 
     match q.clone().data {
-        Some(answear) => {
+        Some(callback) => {
             bot.answer_callback_query(q.id).await?;
 
             bot.delete_message(chat_id, q.message.unwrap().id).await?;
 
-            if answear == "yes" {
+            if callback == "yes" {
                 bot.send_message(chat_id, format!("Transaction executed!"))
                     .await?;
                 // TODO: handle transaction
-            } else if answear == "no" {
+            } else if callback == "no" {
                 bot.send_message(chat_id, format!("Transaction was not executed!"))
                     .await?;
             }
@@ -341,9 +363,9 @@ async fn confirm_transaction(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -
 async fn get_eth_balance(bot: Bot, msg: Message) -> HandlerResult {
     let loading_message_id = loading_message(&bot, &msg).await;
 
-    match api::get_eth_price().await {
-        Ok(eth_price) => match api::get_eth_balance().await {
-            Ok(balance) => {
+    match api::get_eth_balance().await {
+        Ok(balance) => match api::get_eth_price().await {
+            Ok(eth_price) => {
                 let eth_balance = balance.parse::<f64>().unwrap_or(0.0);
                 let usd_balance = ((eth_balance * eth_price) * 100.0).round() / 100.0;
 
@@ -359,7 +381,15 @@ async fn get_eth_balance(bot: Bot, msg: Message) -> HandlerResult {
                 .await?;
             }
             Err(e) => {
+                let eth_balance = balance.parse::<f64>().unwrap_or(0.0);
+
                 bot.delete_message(msg.chat.id, loading_message_id).await?;
+                bot.send_message(
+                    msg.chat.id,
+                    format!("Wallet balance:\n{:.4} ETH", eth_balance),
+                )
+                .await?;
+
                 bot.send_message(
                     msg.chat.id,
                     format!("Something went wrong: {}\n\nPlease try again", e),
@@ -415,19 +445,41 @@ async fn get_erc20_balances(bot: Bot, msg: Message) -> HandlerResult {
     match api::get_token_balances().await {
         Ok(token_balances) => {
             let mut message: String = String::from("ERC-20 Token balances:\n");
+            let mut found: bool = false;
 
             for (token, fields) in token_balances {
-                message.push_str(&format!("\n{token} ({symbol})\n📄 contract: {contract}\n💰 balance: {balance} (${balance_usd})\n",
+                if SETTINGS.lock().await.hide_zero_token_balances
+                    && fields
+                        .get("balance_usd")
+                        .unwrap()
+                        .parse::<f64>()
+                        .unwrap_or(0.0)
+                        == 0.0
+                {
+                    continue;
+                }
+
+                message.push_str(&format!("\n💎 {token} ({symbol})\n📄 contract: {contract}\n💰 balance: {balance} (${balance_usd})\n",
                     token = token,
                     symbol = fields.get("symbol").unwrap(),
                     contract = fields.get("contract").unwrap(),
                     balance = fields.get("balance").unwrap().separate_with_commas(),
                     balance_usd = fields.get("balance_usd").unwrap().separate_with_commas()));
+
+                found = true;
             }
 
             bot.delete_message(msg.chat.id, loading_message_id).await?;
-            bot.send_message(msg.chat.id, format!("{}", message))
-                .await?;
+            match found {
+                true => {
+                    bot.send_message(msg.chat.id, format!("{}", message))
+                        .await?;
+                }
+                false => {
+                    bot.send_message(msg.chat.id, format!("No token balances were found!"))
+                        .await?;
+                }
+            }
         }
         Err(e) => {
             bot.delete_message(msg.chat.id, loading_message_id).await?;
@@ -570,6 +622,24 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
                     warning = true;
                 }
 
+                match api::get_top_token_holders(contract).await {
+                    Ok(token_holders) => {
+                        let mut holdings = 0.0;
+
+                        for owner in token_holders {
+                            holdings += owner.percentage_relative_to_total_supply;
+                        }
+
+                        if holdings > 35.0 {
+                            info = format!(
+                                "{}\n❌ The top 10 wallet holds {:.2}% of the total supply",
+                                info, holdings
+                            );
+                        }
+                    }
+                    Err(_) => {}
+                }
+
                 if !warning {
                     info = info + "\n✅ There were no warnings found";
                 }
@@ -590,6 +660,57 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
         bot.send_message(msg.chat.id, format!("The submitted contract is not valid!"))
             .await?;
     }
+
+    Ok(())
+}
+
+async fn change_settings(bot: Bot, msg: Message, dialogue: MyDialogue) -> HandlerResult {
+    bot.send_message(msg.chat.id, "Settings:")
+        .reply_markup(make_settings_keyboard())
+        .await?;
+    dialogue.update(State::Settings).await?;
+
+    Ok(())
+}
+
+async fn confirm_settings(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
+    let chat_id = q.chat_id().unwrap();
+    let mut settings = SETTINGS.lock().await;
+    let mut change_settings: Settings = *settings;
+
+    match q.data {
+        Some(callback) => {
+            bot.answer_callback_query(q.id).await?;
+
+            // TODO: figure out how to accept multiple callbackQuerys without being stuck in the settings state
+            bot.delete_message(chat_id, q.message.unwrap().id).await?;
+
+            if callback == "hide_zero_balance" {
+                match settings.hide_zero_token_balances {
+                    true => {
+                        change_settings.hide_zero_token_balances = false;
+                        bot.send_message(chat_id, format!("Zero token balances are NOT hidden!"))
+                            .await?;
+                    }
+                    false => {
+                        change_settings.hide_zero_token_balances = true;
+                        bot.send_message(chat_id, format!("Zero token balances are hidden!"))
+                            .await?;
+                    }
+                }
+            }
+        }
+        None => {
+            bot.send_message(
+                chat_id,
+                format!("Something went wrong with the button handling"),
+            )
+            .await?;
+        }
+    }
+
+    *settings = change_settings;
+    dialogue.exit().await?;
 
     Ok(())
 }

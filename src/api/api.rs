@@ -10,11 +10,13 @@ use tokio::sync::Mutex;
 mod alchemy;
 mod etherscan;
 mod honeypot;
+mod moralis;
 
 use alchemy::{AlchemyAPI, TokenBalance, TokenBalancesResult};
 pub use etherscan::EtherscanTokenTransaction;
 use etherscan::{EtherscanAPI, EtherscanEthPrices, EtherscanNormalTransaction};
 pub use honeypot::TokenInfo;
+pub use moralis::TokenOwnersResult;
 
 pub async fn get_eth_price() -> Result<f64, reqwest::Error> {
     match EtherscanAPI::<EtherscanEthPrices>::eth_price().await {
@@ -63,6 +65,22 @@ pub async fn get_token_balances() -> Result<HashMap<String, HashMap<String, Stri
     }
 }
 
+pub async fn get_top_token_holders(
+    contract: String,
+) -> Result<Vec<TokenOwnersResult>, reqwest::Error> {
+    match moralis::get_top_token_holders(contract).await {
+        Ok(token_owners) => Ok(token_owners.result),
+        Err(e) => Err(e.without_url()),
+    }
+}
+
+pub async fn get_token_price(contract: String) -> Result<f32, reqwest::Error> {
+    match moralis::get_token_price(contract).await {
+        Ok(price) => Ok(price.usd_price),
+        Err(e) => Err(e.without_url()),
+    }
+}
+
 pub async fn get_token_info(contract: String) -> Result<TokenInfo, reqwest::Error> {
     match honeypot::get_token_info(contract).await {
         Ok(token_info) => Ok(token_info),
@@ -76,39 +94,31 @@ async fn to_owned_tokens(
     let mut tokens = HashMap::new();
 
     for tb in token_balances {
-        if tb.token_balance != "0x0000000000000000000000000000000000000000000000000000000000000000"
-        {
+        if tb.token_balance.parse::<f64>().unwrap_or(0.0) != 0.0 {
             match honeypot::get_token_info(tb.contract_address.clone()).await {
                 Ok(token_info) => {
+                    let token_price = match get_token_price(tb.contract_address.clone()).await {
+                        Ok(price) => price,
+                        Err(_) => 0.0,
+                    };
+
+                    let balance = hex_to_decimal(&tb.token_balance) as f64
+                        / 10.0f64.powf(token_info.decimals as f64);
+
                     tokens.insert(
                         token_info.name,
                         HashMap::from([
                             (String::from("contract"), tb.contract_address),
                             (String::from("symbol"), token_info.symbol),
+                            (String::from("balance"), format!("{:.2}", balance)),
                             (
-                                String::from("balance"),
-                                format!(
-                                    "{:.2}",
-                                    hex_to_decimal(&tb.token_balance) as f64
-                                        / 10.0f64.powf(token_info.decimals as f64)
-                                ),
+                                String::from("balance_usd"),
+                                format!("{:.2}", token_price as f64 * balance),
                             ),
-                            // TODO: need another api for fetching a token current price
-                            (String::from("balance_usd"), format!("{}", to_eth("0x0000"))),
                         ]),
                     );
                 }
-                Err(_) => {
-                    tokens.insert(
-                        tb.contract_address.clone(),
-                        HashMap::from([
-                            (String::from("contract"), tb.contract_address),
-                            (String::from("symbol"), String::from("")),
-                            (String::from("balance"), String::from("")),
-                            (String::from("balance_usd"), String::from("")),
-                        ]),
-                    );
-                }
+                Err(_) => continue,
             }
         }
     }
@@ -156,7 +166,6 @@ pub async fn watch_wallets(bot: Bot) {
                                 });
 
                             for v in val.iter().rev() {
-                                // TODO: send telegram notification
                                 let _ = bot::watched_wallet_notification(
                                     bot.clone(),
                                     chat_id,
