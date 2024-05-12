@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-pub async fn get_token_info(contract: String) -> Result<TokenInfo, reqwest::Error> {
+pub async fn get_token_info(contract: String) -> Result<HoneypotTokenInfo, reqwest::Error> {
     let response = {
         tokio::task::spawn_blocking(move || {
             HoneypotAPI::send_request(format!(
@@ -15,9 +15,10 @@ pub async fn get_token_info(contract: String) -> Result<TokenInfo, reqwest::Erro
     .await;
 
     match response {
-        Ok(honeypot_api) => Ok(TokenInfo {
+        Ok(honeypot_api) => Ok(HoneypotTokenInfo {
             symbol: HoneypotAPI::get_token_symbol(&honeypot_api),
             name: HoneypotAPI::get_token_name(&honeypot_api),
+            contract_address: HoneypotAPI::get_token_contract_address(&honeypot_api),
             decimals: HoneypotAPI::get_token_deciamls(&honeypot_api),
             pair: HoneypotAPI::get_pair_type(&honeypot_api),
             pair_symbol: HoneypotAPI::get_token_pair_symbol(&honeypot_api),
@@ -35,9 +36,10 @@ pub async fn get_token_info(contract: String) -> Result<TokenInfo, reqwest::Erro
 }
 
 #[derive(Debug)]
-pub struct TokenInfo {
+pub struct HoneypotTokenInfo {
     pub symbol: String,
     pub name: String,
+    pub contract_address: String,
     pub decimals: u8,
     pub pair: String,
     pub pair_symbol: String,
@@ -64,6 +66,10 @@ impl HoneypotAPI {
 
     fn get_token_symbol(api: &HoneypotAPI) -> String {
         api.token.symbol.to_owned()
+    }
+
+    fn get_token_contract_address(api: &HoneypotAPI) -> String {
+        api.token.address.to_owned()
     }
 
     fn get_token_deciamls(api: &HoneypotAPI) -> u8 {

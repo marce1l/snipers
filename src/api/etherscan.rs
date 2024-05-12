@@ -4,15 +4,19 @@ use std::env;
 
 impl<T: de::DeserializeOwned> EtherscanAPI<T> {
     async fn send_request(url: String) -> Result<EtherscanAPI<T>, reqwest::Error> {
-        let response: EtherscanAPI<T> = Client::new().get(url).send().await?.json().await?;
+        let response: EtherscanAPI<T> = Client::new()
+            .get(format!("https://api.etherscan.io/api?{}", url))
+            .send()
+            .await?
+            .json()
+            .await?;
 
         Ok(response)
     }
 
     pub async fn eth_price() -> Result<EtherscanAPI<EtherscanEthPrices>, reqwest::Error> {
         let payload: String = format!(
-            "https://api.etherscan.io/api?\
-            module=stats\
+            "module=stats\
             &action=ethprice\
             &apikey={}",
             env::var("ETHERSCAN_API").unwrap()
@@ -25,8 +29,7 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
         address: String,
     ) -> Result<EtherscanAPI<Vec<EtherscanNormalTransaction>>, reqwest::Error> {
         let payload: String = format!(
-            "https://api.etherscan.io/api?\
-            module=account\
+            "module=account\
             &action=txlist\
             &address={}\
             &startblock=0\
@@ -42,12 +45,33 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
         EtherscanAPI::send_request(payload).await
     }
 
+    pub async fn get_internal_transactions(
+        address: String,
+        number_of_transactions: u8,
+    ) -> Result<EtherscanAPI<Vec<EtherscanInternalTransaction>>, reqwest::Error> {
+        let payload: String = format!(
+            "module=account\
+            &action=txlistinternal\
+            &address={}\
+            &startblock=0\
+            &endblock=99999999\
+            &page=1\
+            &offset={}\
+            &sort=desc\
+            &apikey={}",
+            address,
+            number_of_transactions,
+            env::var("ETHERSCAN_API").unwrap()
+        );
+
+        EtherscanAPI::send_request(payload).await
+    }
+
     pub async fn get_token_transactions(
         address: String,
     ) -> Result<EtherscanAPI<Vec<EtherscanTokenTransaction>>, reqwest::Error> {
         let payload: String = format!(
-            "https://api.etherscan.io/api\
-            ?module=account\
+            "module=account\
             &action=tokentx\
             &address={}\
             &page=1\
@@ -57,6 +81,23 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
             &sort=desc\
             &apikey={}",
             address,
+            env::var("ETHERSCAN_API").unwrap()
+        );
+
+        EtherscanAPI::send_request(payload).await
+    }
+
+    pub async fn get_contract_creator_and_tx_hash(
+        addresses: Vec<String>,
+    ) -> Result<EtherscanAPI<Vec<EtherscanContractCreatorAndTxHash>>, reqwest::Error> {
+        let contracts = addresses.join(",");
+
+        let payload: String = format!(
+            "module=contract\
+            &action=getcontractcreation\
+            &contractaddresses={}\
+            &apikey={}",
+            contracts,
             env::var("ETHERSCAN_API").unwrap()
         );
 
@@ -107,6 +148,26 @@ pub struct EtherscanNormalTransaction {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct EtherscanInternalTransaction {
+    pub block_number: String,
+    pub time_stamp: String,
+    pub hash: String,
+    pub from: String,
+    pub to: String,
+    pub value: String,
+    pub contract_address: String,
+    pub input: String,
+    #[serde(alias = "type")]
+    pub transaction_type: String,
+    pub gas: String,
+    pub gas_used: String,
+    pub trace_id: String,
+    pub is_error: String,
+    pub err_code: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct EtherscanTokenTransaction {
     pub block_number: String,
     pub time_stamp: String,
@@ -127,4 +188,12 @@ pub struct EtherscanTokenTransaction {
     pub cumulative_gas_used: String,
     pub input: String,
     pub confirmations: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EtherscanContractCreatorAndTxHash {
+    pub contract_address: String,
+    pub contract_creator: String,
+    pub tx_hash: String,
 }

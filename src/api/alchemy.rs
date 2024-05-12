@@ -1,7 +1,7 @@
 use reqwest::{header::CONTENT_TYPE, Client};
 use serde::{de, Deserialize, Serialize};
 use serde_json;
-use std::{env, fmt};
+use std::env;
 
 impl<T: de::DeserializeOwned> AlchemyAPI<T> {
     async fn send_request(payload: AlchemyPayload) -> Result<AlchemyAPI<T>, reqwest::Error> {
@@ -42,16 +42,6 @@ impl<T: de::DeserializeOwned> AlchemyAPI<T> {
 
         AlchemyAPI::send_request(payload).await
     }
-
-    pub async fn get_token_balances() -> Result<AlchemyAPI<TokenBalancesResult>, reqwest::Error> {
-        let payload: AlchemyPayload = AlchemyPayload {
-            params: Some(vec![String::from(env::var("ETH_ADDRESS").unwrap())]),
-            method: String::from("alchemy_getTokenBalances"),
-            ..AlchemyPayload::default()
-        };
-
-        AlchemyAPI::send_request(payload).await
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,28 +68,4 @@ struct AlchemyPayload {
     jsonrpc: String,
     params: Option<Vec<String>>,
     method: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TokenBalancesResult {
-    pub address: String,
-    pub token_balances: Vec<TokenBalance>,
-}
-
-impl fmt::Display for TokenBalance {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "contract: {}\nbalance: {}",
-            self.contract_address, self.token_balance
-        )
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TokenBalance {
-    pub contract_address: String,
-    pub token_balance: String,
 }

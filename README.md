@@ -8,6 +8,8 @@ A telegram bot written in rust making ERC-20 token buying and selling simpler, s
 - Check current ERC-20 tokens and ETH balances
 - Monitor ETH wallets for new ERC-20 token transactions
 - Check ETH gas fees and estimated uniswap transaction costs
+- Scan ERC-20 tokens for potential red flags
+- Snipe new tokens after they have passed basic safety checks (on-chain transactions not yet implemented, currently just sends a notification)
 
 ## Setting up your environment
 
@@ -41,12 +43,12 @@ You need to set the following environment variables.
 
 > Command parameters should be seperated by one whitespace
 
-/help &emsp;&nbsp;&nbsp; list availabe commands<br>
-/buy &emsp;&nbsp;&nbsp;&nbsp; buy ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)<br>
-/sell &emsp;&emsp; sell ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)<br>
-/balance &nbsp;get wallet ETH balance<br>
-/tokens &nbsp;&nbsp; get wallet ERC-20 token balances<br>
-/gas &emsp;&emsp; get current eth gas<br>
-/watch &emsp; start monitoring etherum wallets (walletAddress: Vec\<String\>)<br>
-/scan &emsp;&nbsp;&nbsp; scan an ERC-20 token (contract: String)<br>
-/cancel &nbsp;&nbsp;&nbsp; cancel current command<br>
+/help &emsp;&emsp;list availabe commands<br>
+/buy &emsp;&emsp; buy ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)<br>
+/sell &emsp;&emsp;&nbsp; sell ERC-20 token (walletAddress: String amountInUsd: f64 slippagePercent: f32)<br>
+/portfolio&nbsp; get wallet ERC-20 token balances<br>
+/gas &emsp;&emsp;&nbsp; get current eth gas<br>
+/watch &emsp;&nbsp; start monitoring etherum wallets (walletAddress: Vec\<String\>)<br>
+/scan &emsp;&emsp; scan an ERC-20 token (contract: String)<br>
+/settings &nbsp;&nbsp; change bot settings<br>
+/cancel &emsp;&nbsp; cancel current command<br>

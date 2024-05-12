@@ -1,20 +1,19 @@
 use crate::{api, utils};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use core::fmt;
 use lazy_static::lazy_static;
-use std::{
-    collections::HashMap,
-    str::FromStr,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::{collections::HashMap, str::FromStr};
 use teloxide::{
     dispatching::{
         dialogue::{self, GetChatId, InMemStorage},
         UpdateFilterExt, UpdateHandler,
     },
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId},
-    utils::command::{parse_command, BotCommands},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode},
+    utils::{
+        command::{parse_command, BotCommands},
+        html,
+    },
 };
 use thousands::Separable;
 use tokio::sync::Mutex;
@@ -80,13 +79,14 @@ impl fmt::Display for TradeToken {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Settings {
-    hide_zero_token_balances: bool,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Settings {
+    pub hide_zero_token_balances: bool,
+    pub snipe_new_tokens: bool,
 }
 
 #[derive(Clone, Default)]
-pub enum State {
+enum State {
     #[default]
     Start,
     Confirm,
@@ -105,10 +105,8 @@ enum Command {
     Buy(String),
     #[command(description = "sell ERC-20 token")]
     Sell(String),
-    #[command(description = "get wallet ETH balance")]
-    Balance,
     #[command(description = "get wallet ERC-20 token balances")]
-    Tokens,
+    Portfolio,
     #[command(description = "get current eth gas")]
     Gas,
     #[command(description = "start monitoring etherum wallets")]
@@ -122,9 +120,8 @@ enum Command {
 }
 
 lazy_static! {
-    static ref SETTINGS: Mutex<Settings> = Mutex::new(Settings {
-        hide_zero_token_balances: false
-    });
+    pub static ref SETTINGS: Mutex<HashMap<ChatId, Settings>> =
+        Mutex::new(HashMap::<ChatId, Settings>::new());
     static ref TRADE_TOKEN: Mutex<TradeToken> = Mutex::new(TradeToken {
         contract: None,
         amount: None,
@@ -141,8 +138,11 @@ pub async fn run() {
 
     let bot = Bot::from_env();
     let cloned_bot = bot.clone();
+    let cloned_bot2 = bot.clone();
 
     tokio::spawn(async move { api::watch_wallets(cloned_bot).await });
+
+    tokio::spawn(async move { api::new_token_alerts(cloned_bot2).await });
 
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![InMemStorage::<State>::new()])
@@ -159,13 +159,12 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(
             case![State::Start]
                 .branch(case![Command::Buy(tt)].endpoint(trade_token))
-                .branch(case![Command::Sell(tt)].endpoint(trade_token))
-                .branch(case![Command::Balance].endpoint(get_eth_balance))
-                .branch(case![Command::Tokens].endpoint(get_erc20_balances))
-                .branch(case![Command::Gas].endpoint(get_eth_gas))
-                .branch(case![Command::Scan(t)].endpoint(scan_token))
-                .branch(case![Command::Settings].endpoint(change_settings)),
+                .branch(case![Command::Sell(tt)].endpoint(trade_token)),
         )
+        .branch(case![Command::Portfolio].endpoint(get_portfolio))
+        .branch(case![Command::Gas].endpoint(get_eth_gas))
+        .branch(case![Command::Scan(t)].endpoint(scan_token))
+        .branch(case![Command::Settings].endpoint(change_settings))
         .branch(case![Command::Watch(w)].endpoint(watch_wallets))
         .branch(case![Command::Help].endpoint(help))
         .branch(case![Command::Cancel].endpoint(cancel));
@@ -193,10 +192,16 @@ fn make_yes_no_keyboard() -> InlineKeyboardMarkup {
 }
 
 fn make_settings_keyboard() -> InlineKeyboardMarkup {
-    let buttons: Vec<Vec<InlineKeyboardButton>> = vec![vec![InlineKeyboardButton::callback(
-        "Hide zero token balances",
-        "hide_zero_balance",
-    )]];
+    let buttons: Vec<Vec<InlineKeyboardButton>> = vec![
+        vec![InlineKeyboardButton::callback(
+            "Snipe new tokens",
+            "snipe_new_tokens",
+        )],
+        vec![InlineKeyboardButton::callback(
+            "Hide zero token balances",
+            "hide_zero_balance",
+        )],
+    ];
 
     InlineKeyboardMarkup::new(buttons)
 }
@@ -360,56 +365,6 @@ async fn confirm_transaction(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -
     Ok(())
 }
 
-async fn get_eth_balance(bot: Bot, msg: Message) -> HandlerResult {
-    let loading_message_id = loading_message(&bot, &msg).await;
-
-    match api::get_eth_balance().await {
-        Ok(balance) => match api::get_eth_price().await {
-            Ok(eth_price) => {
-                let eth_balance = balance.parse::<f64>().unwrap_or(0.0);
-                let usd_balance = ((eth_balance * eth_price) * 100.0).round() / 100.0;
-
-                bot.delete_message(msg.chat.id, loading_message_id).await?;
-                bot.send_message(
-                    msg.chat.id,
-                    format!(
-                        "Wallet balance:\n{:.4} ETH (${})",
-                        eth_balance,
-                        usd_balance.separate_with_commas()
-                    ),
-                )
-                .await?;
-            }
-            Err(e) => {
-                let eth_balance = balance.parse::<f64>().unwrap_or(0.0);
-
-                bot.delete_message(msg.chat.id, loading_message_id).await?;
-                bot.send_message(
-                    msg.chat.id,
-                    format!("Wallet balance:\n{:.4} ETH", eth_balance),
-                )
-                .await?;
-
-                bot.send_message(
-                    msg.chat.id,
-                    format!("Something went wrong: {}\n\nPlease try again", e),
-                )
-                .await?;
-            }
-        },
-        Err(e) => {
-            bot.delete_message(msg.chat.id, loading_message_id).await?;
-            bot.send_message(
-                msg.chat.id,
-                format!("Something went wrong: {}\n\nPlease try again", e),
-            )
-            .await?;
-        }
-    }
-
-    Ok(())
-}
-
 async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
     let (_, args) =
         parse_command(msg.text().unwrap(), bot.get_me().await.unwrap().username()).unwrap();
@@ -439,46 +394,70 @@ async fn watch_wallets(bot: Bot, msg: Message) -> HandlerResult {
     Ok(())
 }
 
-async fn get_erc20_balances(bot: Bot, msg: Message) -> HandlerResult {
+async fn get_portfolio(bot: Bot, msg: Message) -> HandlerResult {
     let loading_message_id = loading_message(&bot, &msg).await;
 
-    match api::get_token_balances().await {
-        Ok(token_balances) => {
-            let mut message: String = String::from("ERC-20 Token balances:\n");
-            let mut found: bool = false;
+    match api::get_token_balances_with_prices().await {
+        Ok(owned_tokens) => {
+            let mut message: String = String::from("Portfolio:\n");
+            let mut found = false;
 
-            for (token, fields) in token_balances {
-                if SETTINGS.lock().await.hide_zero_token_balances
-                    && fields
-                        .get("balance_usd")
-                        .unwrap()
-                        .parse::<f64>()
-                        .unwrap_or(0.0)
-                        == 0.0
+            for token in owned_tokens {
+                if SETTINGS
+                    .lock()
+                    .await
+                    .get(&msg.chat.id)
+                    .unwrap_or(&Settings {
+                        ..Default::default()
+                    })
+                    .hide_zero_token_balances
+                    && token.value_usd == 0.0
                 {
                     continue;
                 }
 
-                message.push_str(&format!("\n💎 {token} ({symbol})\n📄 contract: {contract}\n💰 balance: {balance} (${balance_usd})\n",
-                    token = token,
-                    symbol = fields.get("symbol").unwrap(),
-                    contract = fields.get("contract").unwrap(),
-                    balance = fields.get("balance").unwrap().separate_with_commas(),
-                    balance_usd = fields.get("balance_usd").unwrap().separate_with_commas()));
+                let percent_change = {
+                    if token.usd_price_24hr_percent_change > 0.0 {
+                        format!("📈 +{:.2}%", token.usd_price_24hr_percent_change)
+                    } else {
+                        format!("📉 {:.2}%", token.usd_price_24hr_percent_change)
+                    }
+                };
+
+                // TODO: add thumbnail to message if available
+                message.push_str(&format!(
+                    "\n💎 {} ({})\n💰 {} (${})\n{}\n📊 {:.2}%\n{} | {}\n",
+                    token.name,
+                    token.symbol,
+                    format!("{:.2}", token.balance).separate_with_commas(),
+                    format!("{:.2}", token.value_usd).separate_with_commas(),
+                    percent_change,
+                    token.portfolio_percentage,
+                    html::link(
+                        &format!("https://dexscreener.com/ethereum/{}", token.contract),
+                        "Chart"
+                    ),
+                    html::link(
+                        &format!(
+                            "https://app.uniswap.org/swap?outputCurrency={}&chain=ethereum",
+                            token.contract
+                        ),
+                        "Swap"
+                    )
+                ));
 
                 found = true;
             }
 
             bot.delete_message(msg.chat.id, loading_message_id).await?;
-            match found {
-                true => {
-                    bot.send_message(msg.chat.id, format!("{}", message))
-                        .await?;
-                }
-                false => {
-                    bot.send_message(msg.chat.id, format!("No token balances were found!"))
-                        .await?;
-                }
+            if found {
+                bot.send_message(msg.chat.id, format!("{}", message))
+                    .parse_mode(ParseMode::Html)
+                    .disable_web_page_preview(true)
+                    .await?;
+            } else {
+                bot.send_message(msg.chat.id, format!("No token balances were found!"))
+                    .await?;
             }
         }
         Err(e) => {
@@ -557,22 +536,43 @@ pub async fn watched_wallet_notification(
     wallet: String,
     transaction: &api::EtherscanTokenTransaction,
 ) -> HandlerResult {
-    // I don't understand why, but I need to do this for the send_messgae function to accept the ChatId...
-    let ch: ChatId = chat_id.into();
-
-    let epoch_time =
-        UNIX_EPOCH + Duration::from_secs(transaction.time_stamp.parse::<u64>().unwrap());
+    let epoch_time = DateTime::UNIX_EPOCH
+        + Duration::try_seconds(transaction.time_stamp.parse::<i64>().unwrap()).unwrap();
     let datetime = DateTime::<Utc>::from(epoch_time);
     let timestamp = datetime.format("%Y-%m-%d %H:%M:%S").to_string();
 
     bot.send_message(
-        ch,
+        chat_id,
         format!(
-            "🚨🚨🚨 New transaction 🚨🚨🚨\n\n🔎 Monitored wallet: {}\n\n⏰ Timestamp (UTC): {}\n🔗 Transaction hash: {}\n💎 Token symbol: {}\n💎 Token name: {}\n📄 Contract: {}",
-            wallet, timestamp, transaction.hash, transaction.token_symbol, transaction.token_name, transaction.contract_address
+            "🚨🚨🚨 New transaction 🚨🚨🚨\n\n🔎 {}\n\n💎 {} ({})\n⏰ (UTC) {}\n{} | {} | {}",
+            wallet,
+            transaction.token_name,
+            transaction.token_symbol,
+            timestamp,
+            html::link(
+                &format!("https://etherscan.io/tx/{}", transaction.hash),
+                "Tx"
+            ),
+            html::link(
+                &format!(
+                    "https://dexscreener.com/ethereum/{}",
+                    transaction.contract_address
+                ),
+                "Chart"
+            ),
+            html::link(
+                &format!(
+                    "https://app.uniswap.org/swap?outputCurrency={}&chain=ethereum",
+                    transaction.contract_address
+                ),
+                "Swap"
+            )
         ),
     )
+    .parse_mode(ParseMode::Html)
+    .disable_web_page_preview(true)
     .await?;
+
     Ok(())
 }
 
@@ -590,8 +590,24 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
             Ok(token_info) => {
                 let mut warning = false;
                 let mut info = format!(
-                    "Scan result for: \n📄 {}\n\n💎 Name: {}\n💎 Symbol: {}\n⚖️ Buy tax: {}\n⚖️ Sell tax: {}\n💰 Liquidity: ${}\n\n🚨 Warnings:",
-                    contract.trim(), token_info.name, token_info.symbol, token_info.buy_tax, token_info.sell_tax, token_info.liquidity.floor().separate_with_commas()
+                    "Scan result for: \n📄 {}\n\n💎 {} ({})\n⚖️ ({}%, {}%)\n💵 ${}\n{} | {}\n\n🚨 Warnings:",
+                    contract.trim(),
+                    token_info.name,
+                    token_info.symbol,
+                    token_info.buy_tax,
+                    token_info.sell_tax,
+                    token_info.liquidity.floor().separate_with_commas(),
+                    html::link(
+                        &format!("https://dexscreener.com/ethereum/{}", token_info.contract_address),
+                        "Chart"
+                    ),
+                    html::link(
+                        &format!(
+                            "https://app.uniswap.org/swap?outputCurrency={}&chain=ethereum",
+                            token_info.contract_address
+                        ),
+                        "Swap"
+                    )
                 );
 
                 if token_info.is_honeypot {
@@ -622,7 +638,32 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
                     warning = true;
                 }
 
-                match api::get_top_token_holders(contract).await {
+                if token_info.liquidity < 5000.0 {
+                    info = info + "\n❌ Liquidity is very small!";
+                    warning = true;
+                }
+
+                match api::is_contract_renounced(token_info.contract_address.clone()).await {
+                    Some(response) => {
+                        if !response {
+                            info = info + "\n❌ Contract is not renounced!";
+                            warning = true;
+                        }
+                    }
+                    None => {}
+                }
+
+                match api::is_liquidity_locked(token_info.contract_address.clone()).await {
+                    Some(response) => {
+                        if !response {
+                            info = info + "\n❌ Liquidity might not be locked!";
+                            warning = true;
+                        }
+                    }
+                    None => {}
+                }
+
+                match api::get_top_token_holders(token_info.contract_address).await {
                     Ok(token_holders) => {
                         let mut holdings = 0.0;
 
@@ -635,6 +676,7 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
                                 "{}\n❌ The top 10 wallet holds {:.2}% of the total supply",
                                 info, holdings
                             );
+                            warning = true;
                         }
                     }
                     Err(_) => {}
@@ -645,7 +687,10 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
                 }
 
                 bot.delete_message(msg.chat.id, loading_message_id).await?;
-                bot.send_message(msg.chat.id, info).await?;
+                bot.send_message(msg.chat.id, info)
+                    .parse_mode(ParseMode::Html)
+                    .disable_web_page_preview(true)
+                    .await?;
             }
             Err(e) => {
                 bot.send_message(
@@ -676,7 +721,7 @@ async fn change_settings(bot: Bot, msg: Message, dialogue: MyDialogue) -> Handle
 async fn confirm_settings(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> HandlerResult {
     let chat_id = q.chat_id().unwrap();
     let mut settings = SETTINGS.lock().await;
-    let mut change_settings: Settings = *settings;
+    let mut change_settings: HashMap<ChatId, Settings> = settings.to_owned();
 
     match q.data {
         Some(callback) => {
@@ -686,17 +731,42 @@ async fn confirm_settings(bot: Bot, dialogue: MyDialogue, q: CallbackQuery) -> H
             bot.delete_message(chat_id, q.message.unwrap().id).await?;
 
             if callback == "hide_zero_balance" {
-                match settings.hide_zero_token_balances {
-                    true => {
-                        change_settings.hide_zero_token_balances = false;
-                        bot.send_message(chat_id, format!("Zero token balances are NOT hidden!"))
-                            .await?;
-                    }
-                    false => {
-                        change_settings.hide_zero_token_balances = true;
-                        bot.send_message(chat_id, format!("Zero token balances are hidden!"))
-                            .await?;
-                    }
+                change_settings
+                    .entry(chat_id.clone())
+                    .and_modify(|value| {
+                        value.hide_zero_token_balances = !value.hide_zero_token_balances
+                    })
+                    .or_insert(Settings {
+                        hide_zero_token_balances: true,
+                        ..Default::default()
+                    });
+
+                if !change_settings
+                    .get(&chat_id)
+                    .unwrap()
+                    .hide_zero_token_balances
+                {
+                    bot.send_message(chat_id, format!("Zero token balances are NOT hidden!"))
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, format!("Zero token balances are hidden!"))
+                        .await?;
+                }
+            } else if callback == "snipe_new_tokens" {
+                change_settings
+                    .entry(chat_id.clone())
+                    .and_modify(|value| value.snipe_new_tokens = !value.snipe_new_tokens)
+                    .or_insert(Settings {
+                        snipe_new_tokens: true,
+                        ..Default::default()
+                    });
+
+                if !change_settings.get(&chat_id).unwrap().snipe_new_tokens {
+                    bot.send_message(chat_id, format!("New tokens are NOT sniped!"))
+                        .await?;
+                } else {
+                    bot.send_message(chat_id, format!("New tokens are sniped!"))
+                        .await?;
                 }
             }
         }
