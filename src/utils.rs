@@ -1,4 +1,5 @@
 use keccak_rust::{Keccak, SecurityLevel, StateBitsWidth};
+use teloxide::utils::html;
 
 pub fn hex_to_decimal(hex: &str) -> u128 {
     let rm_prefix = hex.trim_start_matches("0x");
@@ -64,4 +65,30 @@ fn eth_address_checksum(address: &str) -> bool {
     }
 
     return address == checksum;
+}
+
+pub fn hyperlinks_from_contract(address: &str) -> String {
+    format!(
+        "{} | {}",
+        html::link(
+            &format!("https://dexscreener.com/ethereum/{}", address),
+            "Chart"
+        ),
+        html::link(
+            &format!(
+                "https://app.uniswap.org/swap?outputCurrency={}&chain=ethereum",
+                address
+            ),
+            "Swap"
+        )
+    )
+}
+
+#[test]
+fn test_is_valid_eth_address() {
+    let valid_address = "0x11DDACb10c3891e356dcE6D7c6F22DD69c93E2Cd";
+    let invalid_address = "0x11dDACb10c3891e356dcE6D7c6F22DD69c93E2Cd";
+
+    assert_eq!(is_valid_eth_address(valid_address), true);
+    assert_eq!(is_valid_eth_address(invalid_address), false);
 }

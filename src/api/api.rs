@@ -158,7 +158,7 @@ pub struct OwnedToken {
 }
 
 pub async fn watch_wallets(bot: Bot) {
-    let mut last_transcations = HashMap::<ChatId, HashMap<String, u64>>::new();
+    let mut last_transaction_timestamps = HashMap::<ChatId, HashMap<String, u64>>::new();
 
     loop {
         sleep(Duration::try_minutes(1).unwrap().to_std().unwrap()).await;
@@ -171,75 +171,71 @@ pub async fn watch_wallets(bot: Bot) {
             continue;
         };
 
-        if last_transcations.is_empty() {
-            last_transcations = get_latest_token_transactions(watched_wallets.to_owned()).await;
+        if last_transaction_timestamps.is_empty() {
+            get_last_token_transaction_timestamps(
+                &watched_wallets,
+                &mut last_transaction_timestamps,
+            )
+            .await;
         } else {
-            let new_transactions_by_chat_id =
-                check_for_new_token_transactions(watched_wallets.to_owned(), &last_transcations)
-                    .await;
+            for (chat_id, wallets) in watched_wallets {
+                for wallet in wallets {
+                    match get_new_token_transactions(
+                        wallet.to_owned(),
+                        last_transaction_timestamps
+                            .get(&chat_id)
+                            .unwrap()
+                            .get(&wallet)
+                            .unwrap_or(&0),
+                    )
+                    .await
+                    {
+                        Some(transactions) => {
+                            update_timestamps(
+                                &mut last_transaction_timestamps,
+                                chat_id,
+                                wallet.to_owned(),
+                                transactions[0].time_stamp.parse::<u64>().unwrap_or(0),
+                            );
 
-            for (chat_id, new_transactions) in new_transactions_by_chat_id {
-                for (wallet, transactions) in new_transactions {
-                    match &transactions {
-                        Some(val) => {
-                            // replace latest transaction timestamp
-                            last_transcations
-                                .entry(chat_id)
-                                .and_modify(|map| {
-                                    map.insert(
-                                        wallet.clone(),
-                                        val[0].time_stamp.trim().parse::<u64>().unwrap_or(0),
-                                    );
-                                })
-                                .or_insert_with(|| {
-                                    HashMap::from([(
-                                        wallet.clone(),
-                                        val[0].time_stamp.trim().parse::<u64>().unwrap_or(0),
-                                    )])
-                                });
-
-                            for v in val.iter().rev() {
+                            for transaction in transactions.iter().rev() {
                                 let _ = bot::watched_wallet_notification(
-                                    bot.clone(),
+                                    &bot,
                                     chat_id,
-                                    wallet.clone(),
-                                    v,
+                                    &wallet,
+                                    transaction,
                                 )
                                 .await;
                             }
                         }
                         None => continue,
-                    };
+                    }
                 }
             }
         }
     }
 }
 
-async fn get_latest_token_transactions(
-    watched_wallets: HashMap<ChatId, Vec<String>>,
-) -> HashMap<ChatId, HashMap<String, u64>> {
-    let mut token_transactions = HashMap::<ChatId, HashMap<String, u64>>::new();
-
+async fn get_last_token_transaction_timestamps(
+    watched_wallets: &HashMap<ChatId, Vec<String>>,
+    last_transaction_timestamps: &mut HashMap<ChatId, HashMap<String, u64>>,
+) {
     for (chat_id, wallets) in watched_wallets {
-        for w in wallets {
-            match get_token_transactions(w.to_owned()).await {
-                Ok(val) => {
-                    token_transactions
-                        .entry(chat_id)
+        for wallet in wallets {
+            match get_token_transactions(wallet.to_owned()).await {
+                Ok(transactions) => {
+                    last_transaction_timestamps
+                        .entry(chat_id.to_owned())
                         .and_modify(|map| {
                             map.insert(
-                                w.to_owned(),
-                                val[0].time_stamp.trim().parse::<u64>().unwrap_or(0),
+                                wallet.to_owned(),
+                                transactions[0].time_stamp.parse::<u64>().unwrap_or(0),
                             );
                         })
-                        .or_insert_with(|| {
-                            HashMap::from([(
-                                w,
-                                val[0].time_stamp.trim().parse::<u64>().unwrap_or(0),
-                            )])
-                        });
-                    continue;
+                        .or_insert(HashMap::from([(
+                            wallet.to_owned(),
+                            transactions[0].time_stamp.parse::<u64>().unwrap_or(0),
+                        )]));
                 }
                 Err(_) => {
                     continue;
@@ -247,62 +243,51 @@ async fn get_latest_token_transactions(
             };
         }
     }
-
-    token_transactions
 }
 
-async fn check_for_new_token_transactions(
-    watched_wallets: HashMap<ChatId, Vec<String>>,
-    last_transactions: &HashMap<ChatId, HashMap<String, u64>>,
-) -> HashMap<ChatId, HashMap<String, Option<Vec<EtherscanTokenTransaction>>>> {
-    let mut token_transactions =
-        HashMap::<ChatId, HashMap<String, Option<Vec<EtherscanTokenTransaction>>>>::new();
+fn update_timestamps(
+    last_transaction_timestamps: &mut HashMap<ChatId, HashMap<String, u64>>,
+    chat_id: ChatId,
+    wallet: String,
+    timestamp: u64,
+) {
+    last_transaction_timestamps
+        .entry(chat_id)
+        .and_modify(|map| {
+            map.insert(wallet.clone(), timestamp);
+        })
+        .or_insert(HashMap::from([(wallet, timestamp)]));
+}
 
-    for (chat_id, wallets) in watched_wallets {
-        for w in wallets {
-            match get_token_transactions(w.to_owned()).await {
-                Ok(val) => {
-                    let time_stamp = last_transactions
-                        .get(&chat_id)
-                        .unwrap()
-                        .get(&w)
-                        .unwrap_or(&0);
-                    let mut transactions = Vec::<EtherscanTokenTransaction>::new();
+async fn get_new_token_transactions(
+    wallet: String,
+    timestamp: &u64,
+) -> Option<Vec<EtherscanTokenTransaction>> {
+    match get_token_transactions(wallet).await {
+        Ok(transactions) => {
+            let mut new_transactions = Vec::<EtherscanTokenTransaction>::new();
 
-                    for i in 0..val.len() {
-                        if &val[i].time_stamp.trim().parse::<u64>().unwrap_or(0) > time_stamp {
-                            transactions.push(val[i].clone());
-                        } else {
-                            if i == 0 {
-                                token_transactions
-                                    .entry(chat_id)
-                                    .and_modify(|map| {
-                                        map.insert(w.clone(), None);
-                                    })
-                                    .or_insert_with(|| HashMap::from([(w, None)]));
-                            } else {
-                                token_transactions
-                                    .entry(chat_id)
-                                    .and_modify(|map| {
-                                        map.insert(w.clone(), Some(transactions.clone()));
-                                    })
-                                    .or_insert_with(|| HashMap::from([(w, Some(transactions))]));
-                            }
-
-                            break;
-                        }
-                    }
+            for i in 0..transactions.len() {
+                if &transactions[i].time_stamp.parse::<u64>().unwrap_or(0) > timestamp {
+                    new_transactions.push(transactions[i].clone());
+                } else {
+                    break;
                 }
-                Err(_) => continue,
-            };
-        }
-    }
+            }
 
-    token_transactions
+            if !new_transactions.is_empty() {
+                return Some(new_transactions);
+            }
+
+            return None;
+        }
+        Err(_) => return None,
+    };
 }
 
 pub async fn new_token_alerts(bot: Bot) {
     let mut monitored_tokens: Vec<NewToken> = vec![];
+    let mut last_removed_token = String::from("");
 
     loop {
         sleep(Duration::try_minutes(1).unwrap().to_std().unwrap()).await;
@@ -315,21 +300,26 @@ pub async fn new_token_alerts(bot: Bot) {
             continue;
         }
 
-        for chat_id in settings.keys() {
-            if !settings.get(chat_id).unwrap().snipe_new_tokens {
-                continue;
-            }
+        // Uniswap V2 token contract address
+        check_for_new_tokens(
+            &mut monitored_tokens,
+            String::from("0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"),
+        )
+        .await;
 
-            // Uniswap V2 token contract address
-            check_for_new_tokens(
-                &mut monitored_tokens,
-                String::from("0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"),
-            )
-            .await;
+        // if monitored_tokens was empty and the first element is filtered out then skip checking that token
+        if last_removed_token == monitored_tokens[0].uniswap_pair_address {
+            continue;
+        }
 
-            filter_new_tokens(&mut monitored_tokens).await;
+        filter_new_tokens(&mut monitored_tokens, &mut last_removed_token).await;
 
-            for token in monitored_tokens.clone() {
+        for token in &monitored_tokens {
+            for chat_id in settings.keys() {
+                if !settings.get(chat_id).unwrap().snipe_new_tokens {
+                    continue;
+                }
+
                 if token.to_buy {
                     let _ = bot
                         .send_message(
@@ -397,35 +387,32 @@ pub async fn is_contract_renounced(creator_address: String) -> Option<bool> {
     }
 }
 
-async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>) {
+async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>, last_removed_token: &mut String) {
     #[derive(Default, Debug)]
     struct TokenCheck {
         is_honeypot: bool,
         liquidity_locked: bool,
         contract_renounced: bool,
     }
+
     let mut token_check: HashMap<String, TokenCheck> = HashMap::new();
 
     for token in monitored_tokens.clone() {
+        token_check.insert(
+            token.uniswap_pair_address.clone(),
+            TokenCheck {
+                ..Default::default()
+            },
+        );
+
         match is_token_honeypot(token.uniswap_pair_address.clone()).await {
             Some(value) => {
-                token_check.insert(
-                    token.uniswap_pair_address.clone(),
-                    TokenCheck {
-                        is_honeypot: value,
-                        ..Default::default()
-                    },
-                );
+                token_check
+                    .get_mut(&token.uniswap_pair_address)
+                    .unwrap()
+                    .is_honeypot = value;
             }
-            None => {
-                token_check.insert(
-                    token.uniswap_pair_address.clone(),
-                    TokenCheck {
-                        is_honeypot: false,
-                        ..Default::default()
-                    },
-                );
-            }
+            None => {}
         }
 
         // cannot detect burned liquidity
@@ -461,6 +448,7 @@ async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>) {
                 .unwrap()
                 .is_honeypot
             {
+                *last_removed_token = token.uniswap_pair_address.clone();
                 return false;
             } else if token_check
                 .get(&token.uniswap_pair_address)
@@ -473,6 +461,7 @@ async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>) {
             if Utc::now().timestamp()
                 > (token.creation_timestamp + Duration::try_hours(2).unwrap().num_seconds())
             {
+                *last_removed_token = token.uniswap_pair_address.clone();
                 return false;
             }
         }

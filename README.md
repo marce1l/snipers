@@ -16,7 +16,7 @@ A telegram bot written in rust making ERC-20 token buying and selling simpler, s
 To use this bot, you have to self host it.<br>
 There are a few API keys you will need when setting up your environment, making sure the bot works.
 
-> You can use every API listed here for free, if you don't go over their free tier
+> You can use every API listed here for free (credit card isn't required), if you don't go over their free tier (api requests will just fail)
 
 ### Environment variables
 

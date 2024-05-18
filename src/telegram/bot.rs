@@ -17,6 +17,7 @@ use teloxide::{
 };
 use thousands::Separable;
 use tokio::sync::Mutex;
+use utils::hyperlinks_from_contract;
 
 type MyDialogue = Dialogue<State, InMemStorage<State>>;
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -426,24 +427,14 @@ async fn get_portfolio(bot: Bot, msg: Message) -> HandlerResult {
 
                 // TODO: add thumbnail to message if available
                 message.push_str(&format!(
-                    "\n💎 {} ({})\n💰 {} (${})\n{}\n📊 {:.2}%\n{} | {}\n",
+                    "\n💎 {} ({})\n💰 {} (${})\n{}\n📊 {:.2}%\n{}\n",
                     token.name,
                     token.symbol,
                     format!("{:.2}", token.balance).separate_with_commas(),
                     format!("{:.2}", token.value_usd).separate_with_commas(),
                     percent_change,
                     token.portfolio_percentage,
-                    html::link(
-                        &format!("https://dexscreener.com/ethereum/{}", token.contract),
-                        "Chart"
-                    ),
-                    html::link(
-                        &format!(
-                            "https://app.uniswap.org/swap?outputCurrency={}&chain=ethereum",
-                            token.contract
-                        ),
-                        "Swap"
-                    )
+                    hyperlinks_from_contract(&token.contract)
                 ));
 
                 found = true;
@@ -531,9 +522,9 @@ async fn invalid_state(bot: Bot, msg: Message) -> HandlerResult {
 }
 
 pub async fn watched_wallet_notification(
-    bot: Bot,
+    bot: &Bot,
     chat_id: ChatId,
-    wallet: String,
+    wallet: &String,
     transaction: &api::EtherscanTokenTransaction,
 ) -> HandlerResult {
     let epoch_time = DateTime::UNIX_EPOCH
@@ -544,7 +535,7 @@ pub async fn watched_wallet_notification(
     bot.send_message(
         chat_id,
         format!(
-            "🚨🚨🚨 New transaction 🚨🚨🚨\n\n🔎 {}\n\n💎 {} ({})\n⏰ (UTC) {}\n{} | {} | {}",
+            "🚨🚨🚨 New transaction 🚨🚨🚨\n\n🔎 {}\n\n💎 {} ({})\n⏰ (UTC) {}\n{} | {}",
             wallet,
             transaction.token_name,
             transaction.token_symbol,
@@ -553,20 +544,7 @@ pub async fn watched_wallet_notification(
                 &format!("https://etherscan.io/tx/{}", transaction.hash),
                 "Tx"
             ),
-            html::link(
-                &format!(
-                    "https://dexscreener.com/ethereum/{}",
-                    transaction.contract_address
-                ),
-                "Chart"
-            ),
-            html::link(
-                &format!(
-                    "https://app.uniswap.org/swap?outputCurrency={}&chain=ethereum",
-                    transaction.contract_address
-                ),
-                "Swap"
-            )
+            hyperlinks_from_contract(&transaction.contract_address)
         ),
     )
     .parse_mode(ParseMode::Html)
@@ -590,24 +568,14 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
             Ok(token_info) => {
                 let mut warning = false;
                 let mut info = format!(
-                    "Scan result for: \n📄 {}\n\n💎 {} ({})\n⚖️ ({}%, {}%)\n💵 ${}\n{} | {}\n\n🚨 Warnings:",
-                    contract.trim(),
+                    "Scan result for: \n📄 {}\n\n💎 {} ({})\n⚖️ ({}%, {}%)\n💵 ${}\n{}\n\n🚨 Warnings:",
+                    token_info.contract_address,
                     token_info.name,
                     token_info.symbol,
                     token_info.buy_tax,
                     token_info.sell_tax,
                     token_info.liquidity.floor().separate_with_commas(),
-                    html::link(
-                        &format!("https://dexscreener.com/ethereum/{}", token_info.contract_address),
-                        "Chart"
-                    ),
-                    html::link(
-                        &format!(
-                            "https://app.uniswap.org/swap?outputCurrency={}&chain=ethereum",
-                            token_info.contract_address
-                        ),
-                        "Swap"
-                    )
+                    hyperlinks_from_contract(&token_info.contract_address)
                 );
 
                 if token_info.is_honeypot {
