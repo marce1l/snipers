@@ -15,20 +15,19 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
     }
 
     pub async fn eth_price() -> Result<EtherscanAPI<EtherscanEthPrices>, reqwest::Error> {
-        let payload: String = format!(
+        EtherscanAPI::send_request(format!(
             "module=stats\
             &action=ethprice\
             &apikey={}",
-            env::var("ETHERSCAN_API").unwrap()
-        );
-
-        EtherscanAPI::send_request(payload).await
+            env::var("ETHERSCAN_API").expect("ETHERSCAN_API env var is not set")
+        ))
+        .await
     }
 
     pub async fn get_normal_transactions(
         address: String,
     ) -> Result<EtherscanAPI<Vec<EtherscanNormalTransaction>>, reqwest::Error> {
-        let payload: String = format!(
+        EtherscanAPI::send_request(format!(
             "module=account\
             &action=txlist\
             &address={}\
@@ -39,17 +38,16 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
             &sort=desc\
             &apikey={}",
             address,
-            env::var("ETHERSCAN_API").unwrap()
-        );
-
-        EtherscanAPI::send_request(payload).await
+            env::var("ETHERSCAN_API").expect("ETHERSCAN_API env var is not set")
+        ))
+        .await
     }
 
     pub async fn get_internal_transactions(
         address: String,
         number_of_transactions: u8,
     ) -> Result<EtherscanAPI<Vec<EtherscanInternalTransaction>>, reqwest::Error> {
-        let payload: String = format!(
+        EtherscanAPI::send_request(format!(
             "module=account\
             &action=txlistinternal\
             &address={}\
@@ -61,16 +59,15 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
             &apikey={}",
             address,
             number_of_transactions,
-            env::var("ETHERSCAN_API").unwrap()
-        );
-
-        EtherscanAPI::send_request(payload).await
+            env::var("ETHERSCAN_API").expect("ETHERSCAN_API env var is not set")
+        ))
+        .await
     }
 
     pub async fn get_token_transactions(
         address: String,
     ) -> Result<EtherscanAPI<Vec<EtherscanTokenTransaction>>, reqwest::Error> {
-        let payload: String = format!(
+        EtherscanAPI::send_request(format!(
             "module=account\
             &action=tokentx\
             &address={}\
@@ -81,10 +78,9 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
             &sort=desc\
             &apikey={}",
             address,
-            env::var("ETHERSCAN_API").unwrap()
-        );
-
-        EtherscanAPI::send_request(payload).await
+            env::var("ETHERSCAN_API").expect("ETHERSCAN_API env var is not set")
+        ))
+        .await
     }
 
     pub async fn get_contract_creator_and_tx_hash(
@@ -92,16 +88,15 @@ impl<T: de::DeserializeOwned> EtherscanAPI<T> {
     ) -> Result<EtherscanAPI<Vec<EtherscanContractCreatorAndTxHash>>, reqwest::Error> {
         let contracts = addresses.join(",");
 
-        let payload: String = format!(
+        EtherscanAPI::send_request(format!(
             "module=contract\
             &action=getcontractcreation\
             &contractaddresses={}\
             &apikey={}",
             contracts,
-            env::var("ETHERSCAN_API").unwrap()
-        );
-
-        EtherscanAPI::send_request(payload).await
+            env::var("ETHERSCAN_API").expect("ETHERSCAN_API env var is not set")
+        ))
+        .await
     }
 }
 

@@ -1,0 +1,8 @@
+services:
+  bot:
+    image: marce1l/snipers
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 443:443

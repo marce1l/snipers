@@ -6,23 +6,16 @@ async fn send_request<T: de::DeserializeOwned>(url: String) -> Result<T, reqwest
     let response = Client::new()
         .get(format!("https://deep-index.moralis.io/api/v2.2/{}", url))
         .header(ACCEPT, "applciation/json")
-        .header("X-API-Key", env::var("MORALIS_API").unwrap())
+        .header(
+            "X-API-Key",
+            env::var("MORALIS_API").expect("MORALIS_API env var is not set"),
+        )
         .send()
         .await?
         .json()
         .await?;
 
     Ok(response)
-}
-
-pub async fn get_top_token_holders(
-    contract: String,
-) -> Result<MoralisResult<MoralisTokenOwners>, reqwest::Error> {
-    send_request::<MoralisResult<MoralisTokenOwners>>(format!(
-        "erc20/{}/owners?chain=eth&order=DESC&limit=10",
-        contract
-    ))
-    .await
 }
 
 pub async fn get_token_price(contract: String) -> Result<MoralisTokenPrice, reqwest::Error> {
@@ -37,7 +30,7 @@ pub async fn get_token_balances_with_prices(
 ) -> Result<MoralisResult<MoralisTokenBalancesWithPrices>, reqwest::Error> {
     send_request::<MoralisResult<MoralisTokenBalancesWithPrices>>(format!(
         "wallets/{}/tokens?chain=eth",
-        env::var("ETH_ADDRESS").unwrap()
+        env::var("ETH_ADDRESS").expect("ETH_ADDRESS env var is not set")
     ))
     .await
 }
@@ -48,17 +41,6 @@ pub struct MoralisResult<T> {
     pub page: u16,
     pub page_size: u16,
     pub result: Vec<T>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MoralisTokenOwners {
-    pub balance: String,
-    pub balance_formatted: String,
-    pub is_contract: bool,
-    pub owner_address: String,
-    pub owner_address_label: Option<String>,
-    pub usd_value: String,
-    pub percentage_relative_to_total_supply: f32,
 }
 
 #[derive(Debug, Deserialize)]

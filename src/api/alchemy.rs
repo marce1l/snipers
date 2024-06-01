@@ -8,7 +8,7 @@ impl<T: de::DeserializeOwned> AlchemyAPI<T> {
         let response = Client::new()
             .post(format!(
                 "https://eth-mainnet.g.alchemy.com/v2/{}",
-                env::var("ALCHEMY_API").unwrap()
+                env::var("ALCHEMY_API").expect("ETH_ADDRESS env var is not set")
             ))
             .header(CONTENT_TYPE, "applciation/json")
             .body(serde_json::to_string(&payload).unwrap())
@@ -24,7 +24,7 @@ impl<T: de::DeserializeOwned> AlchemyAPI<T> {
     pub async fn get_eth_balance() -> Result<AlchemyAPI<String>, reqwest::Error> {
         let payload: AlchemyPayload = AlchemyPayload {
             params: Some(vec![
-                String::from(env::var("ETH_ADDRESS").unwrap()),
+                String::from(env::var("ETH_ADDRESS").expect("ETH_ADDRESS env var is not set")),
                 String::from("latest"),
             ]),
             method: String::from("eth_getBalance"),

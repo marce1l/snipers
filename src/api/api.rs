@@ -8,11 +8,14 @@ use teloxide::{requests::Requester, types::ChatId, Bot};
 use tokio::{sync::Mutex, time::sleep};
 
 mod alchemy;
+mod chainbase;
 mod etherscan;
 mod honeypot;
 mod moralis;
 
 use alchemy::AlchemyAPI;
+use chainbase::ChainbaseAPI;
+pub use chainbase::ChainbaseTokenOwners;
 pub use etherscan::EtherscanTokenTransaction;
 use etherscan::{
     EtherscanAPI, EtherscanContractCreatorAndTxHash, EtherscanEthPrices,
@@ -20,7 +23,6 @@ use etherscan::{
 };
 pub use honeypot::HoneypotTokenInfo;
 use moralis::MoralisTokenBalancesWithPrices;
-pub use moralis::MoralisTokenOwners;
 
 pub async fn get_eth_price() -> Result<f64, reqwest::Error> {
     match EtherscanAPI::<EtherscanEthPrices>::eth_price().await {
@@ -78,9 +80,9 @@ pub async fn get_eth_balance() -> Result<String, reqwest::Error> {
 
 pub async fn get_top_token_holders(
     contract: String,
-) -> Result<Vec<MoralisTokenOwners>, reqwest::Error> {
-    match moralis::get_top_token_holders(contract).await {
-        Ok(token_owners) => Ok(token_owners.result),
+) -> Result<Vec<ChainbaseTokenOwners>, reqwest::Error> {
+    match ChainbaseAPI::<Vec<ChainbaseTokenOwners>>::get_top_token_holders(contract).await {
+        Ok(token_owners) => Ok(token_owners.data),
         Err(e) => Err(e.without_url()),
     }
 }
@@ -99,18 +101,32 @@ pub async fn get_token_info(contract: String) -> Result<HoneypotTokenInfo, reqwe
     }
 }
 
-// TODO: here? if addresses is longer than 5 (max allowed) split it into multiple requests
 pub async fn get_contract_creator_and_tx_hash(
     addresses: Vec<String>,
 ) -> Result<Vec<EtherscanContractCreatorAndTxHash>, reqwest::Error> {
-    match EtherscanAPI::<Vec<EtherscanContractCreatorAndTxHash>>::get_contract_creator_and_tx_hash(
-        addresses,
-    )
-    .await
-    {
-        Ok(creators_and_hashes) => Ok(creators_and_hashes.result),
-        Err(e) => Err(e.without_url()),
+    let mut results: Vec<EtherscanContractCreatorAndTxHash> = vec![];
+    let mut grouped_addresses: Vec<String> = vec![];
+
+    for i in 0..addresses.len() {
+        grouped_addresses.push(addresses[i].clone());
+
+        if i % 5 == 0 || i == addresses.len() - 1 {
+            match EtherscanAPI::<Vec<EtherscanContractCreatorAndTxHash>>::get_contract_creator_and_tx_hash(
+                grouped_addresses.clone(),
+            )
+            .await
+            {
+                Ok(creators_and_hashes) => results.extend(creators_and_hashes.result),
+                Err(e) => {
+                    return Err(e.without_url())
+                },
+            };
+
+            grouped_addresses.clear();
+        }
     }
+
+    Ok(results)
 }
 
 pub async fn get_token_balances_with_prices() -> Result<Vec<OwnedToken>, reqwest::Error> {
@@ -162,6 +178,7 @@ pub async fn watch_wallets(bot: Bot) {
 
     loop {
         sleep(Duration::try_minutes(1).unwrap().to_std().unwrap()).await;
+        info!("New watch wallets cycle...");
 
         let watched_wallets_guard = WATCHED_WALLETS.lock().await;
         let watched_wallets = watched_wallets_guard.clone();
@@ -208,7 +225,9 @@ pub async fn watch_wallets(bot: Bot) {
                                 .await;
                             }
                         }
-                        None => continue,
+                        None => {
+                            continue;
+                        }
                     }
                 }
             }
@@ -237,7 +256,8 @@ async fn get_last_token_transaction_timestamps(
                             transactions[0].time_stamp.parse::<u64>().unwrap_or(0),
                         )]));
                 }
-                Err(_) => {
+                Err(e) => {
+                    error!("get_token_transactions error: {}", e);
                     continue;
                 }
             };
@@ -279,10 +299,13 @@ async fn get_new_token_transactions(
                 return Some(new_transactions);
             }
 
-            return None;
+            None
         }
-        Err(_) => return None,
-    };
+        Err(e) => {
+            error!("get_token_transactions error: {}", e);
+            None
+        }
+    }
 }
 
 pub async fn new_token_alerts(bot: Bot) {
@@ -291,6 +314,7 @@ pub async fn new_token_alerts(bot: Bot) {
 
     loop {
         sleep(Duration::try_minutes(1).unwrap().to_std().unwrap()).await;
+        info!("New token alerts cycle...");
 
         let settings_guard = SETTINGS.lock().await;
         let settings = settings_guard.clone();
@@ -321,6 +345,7 @@ pub async fn new_token_alerts(bot: Bot) {
                 }
 
                 if token.to_buy {
+                    trace!("Token to buy true for: {:?}", token);
                     let _ = bot
                         .send_message(
                             *chat_id,
@@ -343,12 +368,15 @@ async fn is_token_honeypot(contract: String) -> Option<bool> {
     match get_token_info(contract).await {
         Ok(info) => {
             if info.is_honeypot || (info.buy_tax > 5.0 || info.sell_tax > 5.0) {
-                return Some(true);
+                Some(true)
             } else {
-                return Some(false);
+                Some(false)
             }
         }
-        Err(_) => None,
+        Err(e) => {
+            error!("get_token_info error: {}", e);
+            None
+        }
     }
 }
 
@@ -357,18 +385,21 @@ pub async fn is_liquidity_locked(contract: String) -> Option<bool> {
         Ok(holders) => {
             for holder in holders {
                 // TrustSwap: Team Finance Lock
-                if holder.owner_address == "0xE2fE530C047f2d85298b07D9333C05737f1435fB"
+                if holder.wallet_address == "0xE2fE530C047f2d85298b07D9333C05737f1435fB"
                 // UNCX Network Security : Token Vesting
-                || holder.owner_address
+                || holder.wallet_address
                 == "0xDba68f07d1b7Ca219f78ae8582C213d975c25cAf"
                 {
                     return Some(true);
                 }
             }
 
-            return Some(false);
+            Some(false)
         }
-        Err(_) => None,
+        Err(e) => {
+            error!("get_top_token_holders error: {}", e);
+            None
+        }
     }
 }
 
@@ -381,9 +412,12 @@ pub async fn is_contract_renounced(creator_address: String) -> Option<bool> {
                 }
             }
 
-            return Some(false);
+            Some(false)
         }
-        Err(_) => None,
+        Err(e) => {
+            error!("get_normal_transactions error: {}", e);
+            None
+        }
     }
 }
 
@@ -398,12 +432,7 @@ async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>, last_removed_to
     let mut token_check: HashMap<String, TokenCheck> = HashMap::new();
 
     for token in monitored_tokens.clone() {
-        token_check.insert(
-            token.uniswap_pair_address.clone(),
-            TokenCheck {
-                ..Default::default()
-            },
-        );
+        token_check.insert(token.uniswap_pair_address.clone(), TokenCheck::default());
 
         match is_token_honeypot(token.uniswap_pair_address.clone()).await {
             Some(value) => {
@@ -471,18 +500,16 @@ async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>, last_removed_to
 
 async fn get_token_contract_from_pair_address(pair_address: String) -> Option<String> {
     match get_token_info(pair_address).await {
-        Ok(info) => {
-            return Some(info.contract_address);
-        }
-        Err(_) => {
-            return None;
+        Ok(info) => Some(info.contract_address),
+        Err(e) => {
+            error!("get_token_info error: {}", e);
+            None
         }
     }
 }
 
 async fn check_for_new_tokens(monitored_tokens: &mut Vec<NewToken>, contract_address: String) {
-    // limit to 5 until I solve batched get_contract_creator_and_tx_hash request sending
-    match get_internal_transactions(contract_address, 5).await {
+    match get_internal_transactions(contract_address, 20).await {
         Ok(etherscan_transactions) => {
             let mut filtered_transactions: Vec<EtherscanInternalTransaction> = vec![];
 
@@ -510,7 +537,9 @@ async fn check_for_new_tokens(monitored_tokens: &mut Vec<NewToken>, contract_add
                 Ok(creator_and_hash) => {
                     creators.extend(creator_and_hash);
                 }
-                Err(_) => {}
+                Err(e) => {
+                    error!("get_contract_creator_and_tx_hash error: {}", e);
+                }
             }
 
             for i in 0..filtered_transactions.len() {
@@ -538,7 +567,9 @@ async fn check_for_new_tokens(monitored_tokens: &mut Vec<NewToken>, contract_add
                 })
             }
         }
-        Err(_) => {}
+        Err(e) => {
+            error!("get_internal_transactions error: {:?}", e);
+        }
     }
 }
 

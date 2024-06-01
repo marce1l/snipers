@@ -2,7 +2,7 @@ use crate::{api, utils};
 use chrono::{DateTime, Duration, Utc};
 use core::fmt;
 use lazy_static::lazy_static;
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, env, str::FromStr};
 use teloxide::{
     dispatching::{
         dialogue::{self, GetChatId, InMemStorage},
@@ -10,6 +10,7 @@ use teloxide::{
     },
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode},
+    update_listeners::webhooks,
     utils::{
         command::{parse_command, BotCommands},
         html,
@@ -134,16 +135,42 @@ lazy_static! {
 }
 
 pub async fn run() {
-    pretty_env_logger::init();
-    log::info!("Starting command bot...");
+    info!("Starting telegram bot...");
 
     let bot = Bot::from_env();
     let cloned_bot = bot.clone();
     let cloned_bot2 = bot.clone();
 
+    info!("Spawning watch_wallets...");
     tokio::spawn(async move { api::watch_wallets(cloned_bot).await });
 
+    info!("Spawning new_token_alerts...");
     tokio::spawn(async move { api::new_token_alerts(cloned_bot2).await });
+
+    // let port: u16 = env::var("PORT")
+    //     .expect("PORT env variable is not set")
+    //     .parse()
+    //     .expect("PORT env variable value is not an integer");
+
+    // let addr = ([0, 0, 0, 0], port).into();
+
+    // let url: reqwest::Url = env::var("WEBHOOK_URL")
+    //     .expect("WEBHOOK_URL env variable is not set")
+    //     .parse()
+    //     .expect("WEBHOOK_URL env variable value is not a url");
+    // let listener = webhooks::axum(bot.clone(), webhooks::Options::new(addr, url))
+    //     .await
+    //     .expect("Couldn't setup webhook");
+
+    // Dispatcher::builder(bot, schema())
+    //     .dependencies(dptree::deps![InMemStorage::<State>::new()])
+    //     .enable_ctrlc_handler()
+    //     .build()
+    //     .dispatch_with_listener(
+    //         listener,
+    //         LoggingErrorHandler::with_custom_text("An error occured"),
+    //     )
+    //     .await;
 
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![InMemStorage::<State>::new()])
@@ -452,10 +479,11 @@ async fn get_portfolio(bot: Bot, msg: Message) -> HandlerResult {
             }
         }
         Err(e) => {
+            error!("get_token_balances_with_prices error: {}", e);
             bot.delete_message(msg.chat.id, loading_message_id).await?;
             bot.send_message(
                 msg.chat.id,
-                format!("Something went wrong: {}\n\nPlease try again", e),
+                format!("Something went wrong, please try again later"),
             )
             .await?;
         }
@@ -480,20 +508,22 @@ async fn get_eth_gas(bot: Bot, msg: Message) -> HandlerResult {
                     bot.send_message(msg.chat.id, response).await?;
                 }
                 Err(e) => {
+                    error!("get_eth_price error: {}", e);
                     bot.delete_message(msg.chat.id, loading_message_id).await?;
                     bot.send_message(
                         msg.chat.id,
-                        format!("Something went wrong: {}\n\nPlease try again", e),
+                        format!("Something went wrong, please try again later"),
                     )
                     .await?;
                 }
             }
         }
         Err(e) => {
+            error!("get_eth_gas error: {}", e);
             bot.delete_message(msg.chat.id, loading_message_id).await?;
             bot.send_message(
                 msg.chat.id,
-                format!("Something went wrong: {}\n\nPlease try again", e),
+                format!("Something went wrong, please try again later"),
             )
             .await?;
         }
@@ -562,9 +592,7 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
         .join("");
 
     if utils::is_valid_eth_address(contract.trim()) {
-        let response = api::get_token_info(contract.trim().to_owned()).await;
-
-        match response {
+        match api::get_token_info(contract.trim().to_owned()).await {
             Ok(token_info) => {
                 let mut warning = false;
                 let mut info = format!(
@@ -631,25 +659,6 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
                     None => {}
                 }
 
-                match api::get_top_token_holders(token_info.contract_address).await {
-                    Ok(token_holders) => {
-                        let mut holdings = 0.0;
-
-                        for owner in token_holders {
-                            holdings += owner.percentage_relative_to_total_supply;
-                        }
-
-                        if holdings > 35.0 {
-                            info = format!(
-                                "{}\n❌ The top 10 wallet holds {:.2}% of the total supply",
-                                info, holdings
-                            );
-                            warning = true;
-                        }
-                    }
-                    Err(_) => {}
-                }
-
                 if !warning {
                     info = info + "\n✅ There were no warnings found";
                 }
@@ -661,9 +670,10 @@ async fn scan_token(bot: Bot, msg: Message) -> HandlerResult {
                     .await?;
             }
             Err(e) => {
+                error!("get_token_info error: {}", e);
                 bot.send_message(
                     msg.chat.id,
-                    format!("Something went wrong... {}\n\nPlease try again", e),
+                    format!("Something went wrong, please try again later"),
                 )
                 .await?;
             }
