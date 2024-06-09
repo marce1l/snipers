@@ -27,6 +27,7 @@ You need to set the following environment variables.
     ETHERSCAN_API="YourAPIKey"
     ALCHEMY_API="YourAPIKey"
     MORALIS_API="YourAPIKey"
+    CHAINBASE_API="YourAPIKey"
 
 - For the **ETH_ADDRESS**, you should add your ethereum address.<br>
   Used for getting wallet balance, executing transactions
@@ -38,6 +39,7 @@ You need to set the following environment variables.
   Used for getting ERC-20 token balances, ETH balance, ETH gas fee
 - For the **MORALIS_API**, you can follow [this tutorial](https://docs.moralis.io/web3-data-api/evm/get-your-api-key).<br>
   Used for getting ERC-20 token prices, top token holders
+- For the **CHAINBASE_API**, you can follow [this tutorial](https://console.chainbase.com/)<br>
 
 ## Commands
 

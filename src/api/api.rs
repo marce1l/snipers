@@ -403,6 +403,24 @@ pub async fn is_liquidity_locked(contract: String) -> Option<bool> {
     }
 }
 
+pub async fn is_liqudity_burned(contract: String) -> Option<bool> {
+    match get_top_token_holders(contract).await {
+        Ok(holders) => {
+            if holders[0].wallet_address == "0x000000000000000000000000000000000000dEaD"
+                && holders.len() == 1
+            {
+                return Some(true);
+            } else {
+                return Some(false);
+            }
+        }
+        Err(e) => {
+            error!("get_top_token_holders error {}", e);
+            None
+        }
+    }
+}
+
 pub async fn is_contract_renounced(creator_address: String) -> Option<bool> {
     match get_normal_transactions(creator_address).await {
         Ok(transactions) => {
@@ -425,7 +443,7 @@ async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>, last_removed_to
     #[derive(Default, Debug)]
     struct TokenCheck {
         is_honeypot: bool,
-        liquidity_locked: bool,
+        liquidity_locked_or_burned: bool,
         contract_renounced: bool,
     }
 
@@ -444,13 +462,22 @@ async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>, last_removed_to
             None => {}
         }
 
-        // cannot detect burned liquidity
+        match is_liqudity_burned(token.uniswap_pair_address.clone()).await {
+            Some(vale) => {
+                token_check
+                    .get_mut(&token.uniswap_pair_address)
+                    .unwrap()
+                    .liquidity_locked_or_burned = vale;
+            }
+            None => {}
+        }
+
         match is_liquidity_locked(token.contract_address).await {
             Some(value) => {
                 token_check
                     .get_mut(&token.uniswap_pair_address)
                     .unwrap()
-                    .liquidity_locked = value;
+                    .liquidity_locked_or_burned = value;
             }
             None => {}
         }
@@ -482,7 +509,7 @@ async fn filter_new_tokens(monitored_tokens: &mut Vec<NewToken>, last_removed_to
             } else if token_check
                 .get(&token.uniswap_pair_address)
                 .unwrap()
-                .liquidity_locked
+                .liquidity_locked_or_burned
             {
                 token.to_buy = true;
             }
