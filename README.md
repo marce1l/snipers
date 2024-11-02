@@ -20,14 +20,18 @@ There are a few API keys you will need when setting up your environment, making 
 
 ### Environment variables
 
-You need to set the following environment variables.
+You can easily set environment variables by creating a .env file in the root of the project. You will need the following environment variables to run the application.
 
-    ETH_ADDRESS="YourETHAddress"
-    TELOXIDE_TOKEN="YourTelegramBotApiKey"
-    ETHERSCAN_API="YourAPIKey"
-    ALCHEMY_API="YourAPIKey"
-    MORALIS_API="YourAPIKey"
-    CHAINBASE_API="YourAPIKey"
+```
+TELOXIDE_TOKEN
+
+ETH_ADDRESS
+
+ETHERSCAN_API
+ALCHEMY_API
+MORALIS_API
+CHAINBASE_API
+```
 
 - For the **ETH_ADDRESS**, you should add your ethereum address.<br>
   Used for getting wallet balance, executing transactions
@@ -39,7 +43,8 @@ You need to set the following environment variables.
   Used for getting ERC-20 token balances, ETH balance, ETH gas fee
 - For the **MORALIS_API**, you can follow [this tutorial](https://docs.moralis.io/web3-data-api/evm/get-your-api-key).<br>
   Used for getting ERC-20 token prices, top token holders
-- For the **CHAINBASE_API**, you can follow [this tutorial](https://console.chainbase.com/)<br>
+- For the **CHAINBASE_API**, you can follow [this tutorial](https://docs.chainbase.com/platform/features/api/web3-api#web3-api).<br>
+  Used for getting a contract's top token holders
 
 ## Commands
 

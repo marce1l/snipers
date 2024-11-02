@@ -10,7 +10,6 @@ use teloxide::{
     },
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode},
-    update_listeners::webhooks,
     utils::{
         command::{parse_command, BotCommands},
         html,
@@ -137,6 +136,8 @@ lazy_static! {
 pub async fn run() {
     info!("Starting telegram bot...");
 
+    let _ = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN env var is not set");
+
     let bot = Bot::from_env();
     let cloned_bot = bot.clone();
     let cloned_bot2 = bot.clone();
@@ -146,31 +147,6 @@ pub async fn run() {
 
     info!("Spawning new_token_alerts...");
     tokio::spawn(async move { api::new_token_alerts(cloned_bot2).await });
-
-    // let port: u16 = env::var("PORT")
-    //     .expect("PORT env variable is not set")
-    //     .parse()
-    //     .expect("PORT env variable value is not an integer");
-
-    // let addr = ([0, 0, 0, 0], port).into();
-
-    // let url: reqwest::Url = env::var("WEBHOOK_URL")
-    //     .expect("WEBHOOK_URL env variable is not set")
-    //     .parse()
-    //     .expect("WEBHOOK_URL env variable value is not a url");
-    // let listener = webhooks::axum(bot.clone(), webhooks::Options::new(addr, url))
-    //     .await
-    //     .expect("Couldn't setup webhook");
-
-    // Dispatcher::builder(bot, schema())
-    //     .dependencies(dptree::deps![InMemStorage::<State>::new()])
-    //     .enable_ctrlc_handler()
-    //     .build()
-    //     .dispatch_with_listener(
-    //         listener,
-    //         LoggingErrorHandler::with_custom_text("An error occured"),
-    //     )
-    //     .await;
 
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![InMemStorage::<State>::new()])

@@ -8,7 +8,7 @@ impl<T: de::DeserializeOwned> AlchemyAPI<T> {
         let response = Client::new()
             .post(format!(
                 "https://eth-mainnet.g.alchemy.com/v2/{}",
-                env::var("ALCHEMY_API").expect("ETH_ADDRESS env var is not set")
+                env::var("ALCHEMY_API").expect("ALCHEMY_API env var is not set")
             ))
             .header(CONTENT_TYPE, "applciation/json")
             .body(serde_json::to_string(&payload).unwrap())
